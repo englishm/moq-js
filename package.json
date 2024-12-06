@@ -4,10 +4,12 @@
 	"private": true,
 	"workspaces": [
 		"lib",
-		"web"
+		"web",
+		"simple-web"
 	],
 	"scripts": {
-		"dev": "npm run dev --workspace web",
+		"dev": "npm run build --workspace moq-player && cp ./lib/dist/iife/* ./simple-web/public/ && npm run dev --workspace simple-moq-web",
+		"dev-web": "npm run dev --workspace web",
 		"build": "npm run build --workspaces",
 		"lint": "npm run lint --workspaces",
 		"fmt": "npm run fmt --workspaces"

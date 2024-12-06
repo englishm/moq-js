@@ -1,0 +1,17 @@
+{
+	"name": "simple-moq-web",
+	"version": "1.0.0",
+	"scripts": {
+		"start": "node index.js",
+		"dev": "nodemon index.js"
+	},
+	"license": "MIT",
+	"dependencies": {
+		"cors": "^2.8.5",
+		"express": "^4.21.1",
+		"path": "^0.12.7"
+	},
+	"devDependencies": {
+		"nodemon": "^3.0.1"
+	}
+}
