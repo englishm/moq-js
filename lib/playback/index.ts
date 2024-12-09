@@ -312,6 +312,15 @@ export class Player {
 		}
 	}
 
+	async setVolume(newVolume: number) {
+		this.#backend.setVolume(newVolume)
+		if (newVolume == 0 && !this.#muted) {
+			await this.mute(true)
+		} else if (newVolume > 0 && this.#muted) {
+			await this.mute(false)
+		}
+	}
+
 	/*
 	async *timeline() {
 		for (;;) {

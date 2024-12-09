@@ -87,6 +87,10 @@ export default class Backend {
 		this.send({ segment }, segment.stream)
 	}
 
+	setVolume(newVolume: number) {
+		this.#audio?.setVolume(newVolume)
+	}
+
 	async close() {
 		this.#worker.terminate()
 		await this.#audio?.context.close()

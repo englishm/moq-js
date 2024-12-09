@@ -10,12 +10,15 @@ import workletURL from "./worklet/index.ts?worker&url"
 export class Audio {
 	context: AudioContext
 	worklet: Promise<AudioWorkletNode>
+	volumeNode: GainNode
 
 	constructor(config: Message.ConfigAudio) {
 		this.context = new AudioContext({
 			latencyHint: "interactive",
 			sampleRate: config.sampleRate,
 		})
+		this.volumeNode = this.context.createGain()
+		this.volumeNode.gain.value = 1.0
 
 		this.worklet = this.load(config)
 	}
@@ -36,8 +39,8 @@ export class Audio {
 		}
 
 		// Connect the worklet to the volume node and then to the speakers
-		worklet.connect(volume)
-		volume.connect(this.context.destination)
+		worklet.connect(this.volumeNode)
+		this.volumeNode.connect(this.context.destination)
 
 		worklet.port.postMessage({ config })
 
@@ -46,5 +49,9 @@ export class Audio {
 
 	private on(_event: MessageEvent) {
 		// TODO
+	}
+
+	public setVolume(newVolume: number) {
+		this.volumeNode.gain.setTargetAtTime(newVolume, this.context.currentTime, 0.01)
 	}
 }
