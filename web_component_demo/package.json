@@ -1,0 +1,21 @@
+{
+	"name": "web_component_demo",
+	"version": "1.0.0",
+	"description": "Demo to run web component demo for issue \\#10 . Should be deleted before merging",
+	"main": "index.js",
+	"dependencies": {
+		"@kixelated/moq": "^0.1.4"
+	},
+	"devDependencies": {
+		"vite": "^6.0.3",
+		"vite-plugin-cross-origin-isolation": "^0.1.6",
+		"vite-plugin-mkcert": "^1.16.0"
+	},
+	"scripts": {
+		"build": "tsc -b",
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"author": "",
+	"type": "module",
+	"license": "ISC"
+}

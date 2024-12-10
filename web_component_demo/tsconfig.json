@@ -1,0 +1,30 @@
+{
+	"compilerOptions": {
+		"target": "es2022",
+		"module": "es2022",
+		"rootDir": ".",
+		"outDir": "./dist",
+		"declaration": true,
+		"composite": true,
+		"declarationMap": true,
+		"sourceMap": true,
+		"types": [], // Don't automatically import any @types modules.
+		"lib": ["es2022", "dom"],
+		"typeRoots": ["./types", "../node_modules/@types"],
+		"useDefineForClassFields": true,
+		"skipLibCheck": true,
+
+		/* Bundler mode */
+		"moduleResolution": "bundler",
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+
+		/* Linting */
+		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true
+	},
+	"include": ["public/src"],
+	"exclude": ["node_modules"]
+}
