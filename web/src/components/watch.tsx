@@ -2,7 +2,7 @@
 import { Player } from "@kixelated/moq/playback"
 import Fail from "./fail"
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
-import { VolumeButton } from "./volume"
+import { VolumeControl } from "./volume"
 import { PlayButton } from "./play-button"
 import { TrackSelect } from "./track-select"
 
@@ -34,6 +34,10 @@ export default function Watch(props: { name: string }) {
 
 	const mute = (state: boolean) => {
 		player()?.mute(state).catch(setError)
+	}
+
+	const setVolume = (newVolume: number) => {
+		player()?.setVolume(newVolume).catch(setError)
 	}
 
 	const switchTrack = (track: string) => {
@@ -108,7 +112,7 @@ export default function Watch(props: { name: string }) {
 				>
 					<PlayButton onClick={handlePlayPause} isPlaying={isPlaying()} />
 					<div class="absolute bottom-0 right-4 flex h-[32px] w-fit items-center justify-evenly gap-[4px] rounded bg-black/70 p-2">
-						<VolumeButton mute={mute} />
+						<VolumeControl mute={mute} setVolume={setVolume} />
 						<TrackSelect trackNum={tracknum} getVideoTracks={getVideoTracks} switchTrack={switchTrack} />
 					</div>
 				</div>
