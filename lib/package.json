@@ -1,29 +1,61 @@
 {
-	"name": "@kixelated/moq",
-	"type": "module",
-	"version": "0.1.4",
+	"name": "moq-player",
+	"version": "0.0.1",
 	"description": "Media over QUIC library",
 	"license": "(MIT OR Apache-2.0)",
-	"repository": "github:kixelated/moq-js",
+	"entry": "playback/index.ts",
+	"main": "dist/moq-player.cjs.js",
+	"module": "dist/moq-player.esm.js",
+	"iife": "dist/moq-player.iife.js",
+	"types": "dist/types/moq-player.d.ts",
 	"scripts": {
-		"build": "tsc -b && cp ../LICENSE* ./dist && cp ./README.md ./dist && cp ./package.json ./dist",
-		"lint": "eslint .",
+		"build": "rollup -c",
+		"dev": "rollup -c -w",
+		"lint": "eslint . --ext .js,.ts,.jsx,.tsx",
 		"fmt": "prettier --write ."
 	},
 	"devDependencies": {
+		"@babel/core": "^7.26.0",
+		"@babel/preset-env": "^7.26.0",
+		"@babel/preset-typescript": "^7.26.0",
+		"@rollup/plugin-babel": "^6.0.4",
+		"@rollup/plugin-commonjs": "^28.0.1",
+		"@rollup/plugin-node-resolve": "^15.3.0",
+		"@rollup/plugin-terser": "^0.4.4",
+		"@rollup/plugin-typescript": "^12.1.1",
 		"@types/audioworklet": "^0.0.50",
 		"@types/dom-mediacapture-transform": "^0.1.6",
 		"@types/dom-webcodecs": "^0.1.8",
-		"@typescript/lib-dom": "npm:@types/web@^0.0.115",
 		"@typescript-eslint/eslint-plugin": "^6.4.0",
 		"@typescript-eslint/parser": "^6.4.0",
+		"@typescript/lib-dom": "npm:@types/web@^0.0.115",
+		"cross-env": "^7.0.2",
 		"eslint": "^8.47.0",
 		"eslint-config-prettier": "^9.0.0",
 		"eslint-plugin-prettier": "^5.0.0",
+		"npm-run-all": "^4.1.5",
 		"prettier": "^3.0.1",
-		"typescript": "^5.1.6"
+		"rollup": "^4.28.0",
+		"rollup-plugin-sourcemaps": "^0.6.2",
+		"rollup-plugin-web-worker-loader": "github:montevideo-tech/rollup-plugin-web-worker-loader",
+		"tslib": "^2.8.1",
+		"typescript": "^5.7.2"
 	},
 	"dependencies": {
 		"mp4box": "^0.5.2"
+	},
+	"browserslist": {
+		"production": [
+			"chrome >= 97",
+			"edge >= 98",
+			"firefox >= 130",
+			"opera >= 83",
+			"safari >= 18"
+		],
+		"development": [
+			"last 1 chrome version",
+			"last 1 firefox version",
+			"last 1 safari version"
+		]
 	}
 }

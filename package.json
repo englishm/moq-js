@@ -4,12 +4,20 @@
 	"private": true,
 	"workspaces": [
 		"lib",
-		"web"
+		"web",
+		"simple-web"
 	],
 	"scripts": {
-		"dev": "npm run dev --workspace web",
+		"dev:moq-player": "npm run dev --workspace=moq-player",
+		"dev:simple-moq-web": "npm run dev --workspace=simple-moq-web",
+		"dev": "npm-run-all --parallel dev:moq-player dev:simple-moq-web",
 		"build": "npm run build --workspaces",
+		"build-web": "npm run build --workspace=web",
+		"dev-web": "npm run dev --workspace=web",
 		"lint": "npm run lint --workspaces",
 		"fmt": "npm run fmt --workspaces"
+	},
+	"devDependencies": {
+		"npm-run-all": "^4.1.5"
 	}
 }
