@@ -5,6 +5,7 @@ import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-j
 import { VolumeButton } from "./volume"
 import { PlayButton } from "./play-button"
 import { TrackSelect } from "./track-select"
+import { FullscreenButton } from "./fullscreen"
 
 export default function Watch(props: { name: string }) {
 	// Use query params to allow overriding environment variables.
@@ -81,7 +82,6 @@ export default function Watch(props: { name: string }) {
 	createEffect(() => {
 		if (hovered()) {
 			setShowControls(true)
-			return
 		}
 
 		const timeoutId = setTimeout(() => setShowControls(false), 3000)
@@ -93,7 +93,7 @@ export default function Watch(props: { name: string }) {
 	return (
 		<>
 			<Fail error={error()} />
-			<div class="relative aspect-video w-full">
+			<div class="relative aspect-video w-full" id="video">
 				<canvas
 					ref={canvas}
 					onClick={handlePlayPause}
@@ -110,6 +110,7 @@ export default function Watch(props: { name: string }) {
 					<div class="absolute bottom-0 right-4 flex h-[32px] w-fit items-center justify-evenly gap-[4px] rounded bg-black/70 p-2">
 						<VolumeButton mute={mute} />
 						<TrackSelect trackNum={tracknum} getVideoTracks={getVideoTracks} switchTrack={switchTrack} />
+						<FullscreenButton />
 					</div>
 				</div>
 			</div>
