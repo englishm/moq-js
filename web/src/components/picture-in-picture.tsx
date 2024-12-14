@@ -1,4 +1,5 @@
 import { onCleanup } from "solid-js"
+import { pipState, setPipState } from "src/store/state"
 
 interface DocumentPictureInPicture {
 	requestWindow: (options: { width: number; height: number }) => Promise<WindowWithPiP>
@@ -18,17 +19,12 @@ interface Window {
 
 declare let documentPictureInPicture: DocumentPictureInPicture
 
-type PictureInPictureButtonProps = {
-	pipActive: boolean
-	setPipActive: (active: boolean) => void
-}
-
-export const PictureInPictureButton = (props: PictureInPictureButtonProps) => {
+export const PictureInPictureButton = () => {
 	let videoCanvasElement: HTMLElement | null
 	let pipWindow: WindowWithPiP | null
 
-	const handleEnterPip = () => props.setPipActive(true)
-	const handleLeavePip = () => props.setPipActive(false)
+	const handleEnterPip = () => setPipState({ pipActive: true })
+	const handleLeavePip = () => setPipState({ pipActive: false })
 
 	const restoreVideoCanvas = () => {
 		const playerContainer = document.getElementById("video")
@@ -94,9 +90,9 @@ export const PictureInPictureButton = (props: PictureInPictureButtonProps) => {
 			onClick={() => {
 				togglePictureInPicture().catch((error) => console.error("Error handling PiP button click:", error))
 			}}
-			aria-label={props.pipActive ? "Exit picture-in-picture mode" : "Enter picture-in-picture mode"}
+			aria-label={pipState.pipActive ? "Exit picture-in-picture mode" : "Enter picture-in-picture mode"}
 		>
-			{props.pipActive ? (
+			{pipState.pipActive ? (
 				<span role="img" aria-hidden="true">
 					📺
 				</span>

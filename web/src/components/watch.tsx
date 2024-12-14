@@ -6,6 +6,7 @@ import { VolumeButton } from "./volume"
 import { PlayButton } from "./play-button"
 import { TrackSelect } from "./track-select"
 import { PictureInPictureButton } from "./picture-in-picture"
+import { pipState } from "src/store/state"
 
 export default function Watch(props: { name: string }) {
 	// Use query params to allow overriding environment variables.
@@ -21,7 +22,6 @@ export default function Watch(props: { name: string }) {
 	const [showCatalog, setShowCatalog] = createSignal(false)
 	const [hovered, setHovered] = createSignal(false)
 	const [showControls, setShowControls] = createSignal(true)
-	const [pipActive, setPipActive] = createSignal(false)
 
 	createEffect(() => {
 		const namespace = props.name
@@ -86,7 +86,7 @@ export default function Watch(props: { name: string }) {
 			return
 		}
 
-		const timeoutId = setTimeout(() => !pipActive() && setShowControls(false), 3000)
+		const timeoutId = setTimeout(() => !pipState.pipActive && setShowControls(false), 3000)
 		onCleanup(() => clearTimeout(timeoutId))
 	})
 
@@ -104,7 +104,7 @@ export default function Watch(props: { name: string }) {
 					onMouseEnter={() => setHovered(true)}
 					onMouseLeave={() => setHovered(false)}
 				/>
-				{pipActive() && (
+				{pipState.pipActive && (
 					<div class="relative flex h-full w-full items-center justify-center bg-black text-white">
 						Picture-in-Picture Mode
 					</div>
@@ -118,7 +118,7 @@ export default function Watch(props: { name: string }) {
 					<div class="absolute bottom-0 right-4 flex h-[32px] w-fit items-center justify-evenly gap-[4px] rounded bg-black/70 p-2">
 						<VolumeButton mute={mute} />
 						<TrackSelect trackNum={tracknum} getVideoTracks={getVideoTracks} switchTrack={switchTrack} />
-						<PictureInPictureButton setPipActive={setPipActive} pipActive={pipActive()} />
+						<PictureInPictureButton />
 					</div>
 				</div>
 			</div>
