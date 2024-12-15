@@ -118,7 +118,7 @@ export default function Watch(props: { name: string }) {
 					<div class="absolute bottom-0 right-4 flex h-[32px] w-fit items-center justify-evenly gap-[4px] rounded bg-black/70 p-2">
 						<VolumeButton mute={mute} />
 						<TrackSelect trackNum={tracknum} getVideoTracks={getVideoTracks} switchTrack={switchTrack} />
-						<PictureInPictureButton />
+						{"documentPictureInPicture" in window && <PictureInPictureButton />}
 					</div>
 				</div>
 			</div>
