@@ -22,6 +22,16 @@ export const FullscreenButton = () => {
 		document.addEventListener("fullscreenchange", handleFullscreenChange)
 		onCleanup(() => document.removeEventListener("fullscreenchange", handleFullscreenChange))
 	})
+	createEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (e.code === "KeyF") {
+				toggleFullscreen()
+			}
+		}
+
+		document.addEventListener("keydown", handleKeyDown, false)
+		onCleanup(() => document.removeEventListener("keydown", handleKeyDown))
+	})
 
 	return (
 		<button
