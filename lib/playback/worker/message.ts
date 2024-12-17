@@ -76,7 +76,7 @@ export interface ToWorker {
 	// Sent on each init/data stream
 	init?: Init
 	segment?: Segment
-	pause?: boolean
+	play?: boolean
 
 	/*
 	// Sent to control playback

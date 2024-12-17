@@ -68,7 +68,11 @@ export default class Backend {
 	}
 
 	pause() {
-		this.send({ pause: true })
+		this.send({ play: false })
+	}
+
+	play() {
+		this.send({ play: true })
 	}
 
 	async mute() {

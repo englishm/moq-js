@@ -22,6 +22,7 @@ class Worker {
 
 	on(e: MessageEvent) {
 		const msg = e.data as Message.ToWorker
+		// console.log("message: ", msg)
 
 		if (msg.config) {
 			this.#onConfig(msg.config)
@@ -30,8 +31,10 @@ class Worker {
 			this.#onInit(msg.init)
 		} else if (msg.segment) {
 			this.#onSegment(msg.segment).catch(console.warn)
-		} else if (msg.pause) {
-			this.#onPause(msg.pause)
+		} else if (msg.play === false) {
+			this.#onPause(msg.play)
+		} else if (msg.play === true) {
+			this.#onPlay(msg.play)
 		} else {
 			throw new Error(`unknown message: + ${JSON.stringify(msg)}`)
 		}
@@ -103,9 +106,15 @@ class Worker {
 		await segment.close()
 	}
 
-	#onPause(pause: boolean) {
-		if (this.#video && pause) {
+	#onPause(play: boolean) {
+		if (this.#video && !play) {
 			this.#video.pause()
+		}
+	}
+
+	#onPlay(play: boolean) {
+		if (this.#video && play) {
+			this.#video.play()
 		}
 	}
 }

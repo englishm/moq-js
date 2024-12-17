@@ -27,10 +27,12 @@ export class Renderer {
 
 	#decoderConfig?: DecoderConfig
 	#waitingForKeyframe: boolean = true
+	#paused: boolean
 
 	constructor(config: Message.ConfigVideo, timeline: Component) {
 		this.#canvas = config.canvas
 		this.#timeline = timeline
+		this.#paused = false
 
 		this.#queue = new TransformStream({
 			start: this.#start.bind(this),
@@ -41,14 +43,22 @@ export class Renderer {
 	}
 
 	pause() {
-		console.log("pause")
+		this.#paused = true
+		this.#decoder.flush().catch((err) => {
+			console.error(err)
+		})
 		this.#waitingForKeyframe = true
+	}
+
+	play() {
+		this.#paused = false
 	}
 
 	async #run() {
 		const reader = this.#timeline.frames.pipeThrough(this.#queue).getReader()
 		for (;;) {
 			const { value: frame, done } = await reader.read()
+			if (this.#paused) continue
 			if (done) break
 
 			self.requestAnimationFrame(() => {
@@ -74,8 +84,8 @@ export class Renderer {
 	}
 
 	#transform(frame: Frame) {
-		if (this.#decoder.state === "closed") {
-			console.warn("Decoder is closed. Skipping frame.")
+		if (this.#decoder.state === "closed" || this.#paused) {
+			console.warn("Decoder is closed or paused. Skipping frame.")
 			return
 		}
 
