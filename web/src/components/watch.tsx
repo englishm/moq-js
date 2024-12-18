@@ -50,12 +50,12 @@ export default function Watch(props: { name: string }) {
 
 		if (playerInstance.isPaused()) {
 			playerInstance
-				.play()
+				.togglePlayPause()
 				.then(() => setIsPlaying(true))
 				.catch(setError)
 		} else {
 			playerInstance
-				.play()
+				.togglePlayPause()
 				.then(() => setIsPlaying(false))
 				.catch(setError)
 		}
