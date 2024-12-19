@@ -20,7 +20,7 @@ export interface PlayerConfig {
 }
 
 // This class must be created on the main thread due to AudioContext.
-export class Player {
+export default class Player {
 	#backend: Backend
 
 	// A periodically updated timeline
