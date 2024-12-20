@@ -1,5 +1,6 @@
 /* eslint-disable jsx-a11y/media-has-caption */
-import { Player } from "@kixelated/moq/playback"
+import Player from "moq-player"
+
 import Fail from "./fail"
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
 import { VolumeControl } from "./volume"

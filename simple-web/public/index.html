@@ -1,0 +1,23 @@
+<head>
+	<script src="./moq-player/moq-player.iife.js"></script>
+</head>
+<body>
+	<canvas id="canvas"></canvas>
+	<button id="playButton">Play</button>
+	<script>
+		elem = document.getElementById("canvas");
+		var config = {
+			url: "https://localhost:4443",
+			fingerprint: "https://localhost:4443/fingerprint",
+			canvas: elem,
+			namespace: "bbb",
+		};
+		var player = null;
+		moqplayer.create(config, 0).then((p) => {
+			player = p;
+		});
+		playButton.addEventListener("click", () => {
+			player.play();
+		});
+	</script>
+</body>
