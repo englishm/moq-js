@@ -5,7 +5,7 @@ import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-j
 import { VolumeControl } from "./volume"
 import { PlayButton } from "./play-button"
 import { TrackSelect } from "./track-select"
-import { promise } from "astro/zod"
+import { state, setState } from "src/store/state"
 
 export default function Watch(props: { name: string }) {
 	// Use query params to allow overriding environment variables.
@@ -16,8 +16,6 @@ export default function Watch(props: { name: string }) {
 	let canvas!: HTMLCanvasElement
 
 	const [error, setError] = createSignal<Error | undefined>()
-	const [player, setPlayer] = createSignal<Player | undefined>()
-	const [isPlaying, setIsPlaying] = createSignal(!player()?.isPaused())
 	const [showCatalog, setShowCatalog] = createSignal(false)
 	const [hovered, setHovered] = createSignal(false)
 	const [showControls, setShowControls] = createSignal(true)
@@ -30,43 +28,14 @@ export default function Watch(props: { name: string }) {
 		// TODO remove this when WebTransport correctly supports self-signed certificates
 		const fingerprint = server.startsWith("localhost") ? `https://${server}/fingerprint` : undefined
 
-		Player.create({ url, fingerprint, canvas, namespace }, tracknum).then(setPlayer).catch(setError)
+		Player.create({ url, fingerprint, canvas, namespace }, tracknum)
+			.then((player) => state.setPlayer(player))
+			.catch(setError)
 	})
-
-	const mute = (state: boolean) => {
-		player()?.mute(state).catch(setError)
-	}
-
-	const setVolume = (newVolume: number) => {
-		player()?.setVolume(newVolume).catch(setError)
-	}
-
-	const switchTrack = (track: string) => {
-		void player()?.switchTrack(track)
-	}
-
-	const getVideoTracks = (): string[] | undefined => {
-		return player()?.getVideoTracks()
-	}
-
-	const handlePlayPause = () => {
-		const playerInstance = player()
-		if (!playerInstance) return
-		try {
-			void playerInstance.play()
-			if (playerInstance.isPaused()) {
-				setIsPlaying(false)
-			} else {
-				setIsPlaying(true)
-			}
-		} catch (err) {
-			setError(err instanceof Error ? err : new Error(String(err)))
-		}
-	}
 
 	// The JSON catalog for debugging.
 	const catalog = createMemo(() => {
-		const playerInstance = player()
+		const playerInstance = state.player
 		if (!playerInstance) return
 
 		const catalog = playerInstance.getCatalog()
@@ -74,7 +43,7 @@ export default function Watch(props: { name: string }) {
 	})
 
 	createEffect(() => {
-		const playerInstance = player()
+		const playerInstance = state.player
 		if (!playerInstance) return
 
 		onCleanup(() => playerInstance.close())
@@ -99,7 +68,7 @@ export default function Watch(props: { name: string }) {
 			<div class="relative aspect-video w-full">
 				<canvas
 					ref={canvas}
-					onClick={handlePlayPause}
+					onClick={state.handlePlayPause}
 					class="h-full w-full rounded-lg"
 					onMouseEnter={() => setHovered(true)}
 					onMouseLeave={() => setHovered(false)}
@@ -109,10 +78,10 @@ export default function Watch(props: { name: string }) {
 						showControls() ? "opacity-100" : "opacity-0"
 					} absolute bottom-4 flex h-[40px] w-[100%] items-center gap-[4px] rounded transition-opacity duration-200 `}
 				>
-					<PlayButton onClick={handlePlayPause} isPlaying={isPlaying()} />
+					<PlayButton />
 					<div class="absolute bottom-0 right-4 flex h-[32px] w-fit items-center justify-evenly gap-[4px] rounded bg-black/70 p-2">
-						<VolumeControl mute={mute} setVolume={setVolume} />
-						<TrackSelect trackNum={tracknum} getVideoTracks={getVideoTracks} switchTrack={switchTrack} />
+						<VolumeControl />
+						<TrackSelect trackNum={tracknum} />
 					</div>
 				</div>
 			</div>
