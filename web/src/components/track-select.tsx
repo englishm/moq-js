@@ -1,9 +1,8 @@
 import { createEffect, createSignal } from "solid-js"
+import { state } from "src/store/state"
 
 type TrackSelectProps = {
 	trackNum: number
-	getVideoTracks: () => string[] | undefined
-	switchTrack: (track: string) => void
 }
 
 export const TrackSelect = (props: TrackSelectProps) => {
@@ -13,7 +12,7 @@ export const TrackSelect = (props: TrackSelectProps) => {
 
 	const handleTrackChange = (track: string) => {
 		setSelectedOption(track)
-		props.switchTrack(track)
+		state.switchTrack(track)
 		setShowTracks(false)
 	}
 
@@ -24,7 +23,7 @@ export const TrackSelect = (props: TrackSelectProps) => {
 	}
 
 	createEffect(() => {
-		const videotracks = props.getVideoTracks()
+		const videotracks = state.getVideoTracks()
 		if (!videotracks?.length) return
 
 		setOptions(videotracks)
