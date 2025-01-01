@@ -2,7 +2,7 @@ import { Connection } from "../../transport"
 import { asError } from "../../common/error"
 
 export interface CommonTrackFields {
-	namespace?: string
+	namespace?: string[]
 	packaging?: string
 	renderGroup?: number
 	altGroup?: number
@@ -28,6 +28,9 @@ export function decode(raw: Uint8Array): Root {
 	const str = decoder.decode(raw)
 
 	const catalog = JSON.parse(str)
+	// namespace comes serialized as a "/" joined string, cast it back to a tuple (array)
+	catalog.commonTrackFields.namespace = catalog.commonTrackFields.namespace?.split("/").filter(Boolean) // remove empty strings
+
 	if (!isRoot(catalog)) {
 		throw new Error("invalid catalog")
 	}
@@ -43,7 +46,7 @@ export function decode(raw: Uint8Array): Root {
 	return catalog
 }
 
-export async function fetch(connection: Connection, namespace: string): Promise<Root> {
+export async function fetch(connection: Connection, namespace: string[]): Promise<Root> {
 	const subscribe = await connection.subscribe(namespace, ".catalog")
 	try {
 		const segment = await subscribe.data()
@@ -61,6 +64,7 @@ export async function fetch(connection: Connection, namespace: string): Promise<
 			throw new Error("invalid catalog chunk")
 		}
 	} catch (e) {
+		console.error("Catalog fetch error: ", e)
 		const err = asError(e)
 
 		// Close the subscription after we're done.
@@ -78,7 +82,7 @@ export function isRoot(catalog: any): catalog is Root {
 }
 
 export interface Track {
-	namespace?: string
+	namespace?: string[]
 	name: string
 	depends?: any[]
 	packaging?: string
@@ -174,7 +178,7 @@ function isCatalogFieldValid(catalog: any, field: string): boolean {
 	}
 
 	function isValidNamespace(namespace: any): boolean {
-		return typeof namespace === "string"
+		return Array.isArray(namespace) && namespace.every((ns) => typeof ns === "string")
 	}
 
 	let isValidField: (value: any) => boolean

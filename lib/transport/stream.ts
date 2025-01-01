@@ -18,6 +18,10 @@ export class Reader {
 		this.#reader = this.#stream.getReader()
 	}
 
+	getByteLength(): number {
+		return this.#buffer.byteLength
+	}
+
 	// Adds more data to the buffer, returning true if more data was added.
 	async #fill(): Promise<boolean> {
 		const result = await this.#reader.read()
@@ -67,6 +71,17 @@ export class Reader {
 		// eslint-disable-next-line no-empty
 		while (await this.#fill()) {}
 		return this.#slice(this.#buffer.byteLength)
+	}
+
+	async tuple(): Promise<string[]> {
+		const length = await this.u53()
+		const tuple = (await this.string()).split("/").filter(Boolean) // remove empty strings
+
+		if (length !== tuple.length) {
+			throw new Error(`expected tuple length ${length}, got ${tuple.length}`)
+		}
+
+		return tuple
 	}
 
 	async string(maxLength?: number): Promise<string> {
@@ -154,7 +169,7 @@ export class Writer {
 	}
 
 	async u8(v: number) {
-		await this.write(setUint8(this.#scratch, v))
+		await this.write(this.setUint8(this.#scratch, v))
 	}
 
 	async i32(v: number) {
@@ -164,7 +179,7 @@ export class Writer {
 
 		// We don't use a VarInt, so it always takes 4 bytes.
 		// This could be improved but nothing is standardized yet.
-		await this.write(setInt32(this.#scratch, v))
+		await this.write(this.setInt32(this.#scratch, v))
 	}
 
 	async u53(v: number) {
@@ -174,7 +189,7 @@ export class Writer {
 			throw new Error(`overflow, value larger than 53-bits: ${v}`)
 		}
 
-		await this.write(setVint53(this.#scratch, v))
+		await this.write(this.setVint53(this.#scratch, v))
 	}
 
 	async u62(v: bigint) {
@@ -184,13 +199,109 @@ export class Writer {
 			throw new Error(`overflow, value larger than 62-bits: ${v}`)
 		}
 
-		await this.write(setVint62(this.#scratch, v))
+		await this.write(this.setVint62(this.#scratch, v))
+	}
+
+	setUint8(dst: Uint8Array, v: number): Uint8Array {
+		dst[0] = v
+		return dst.slice(0, 1)
+	}
+
+	setUint16(dst: Uint8Array, v: number): Uint8Array {
+		const view = new DataView(dst.buffer, dst.byteOffset, 2)
+		view.setUint16(0, v)
+
+		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+	}
+
+	setInt32(dst: Uint8Array, v: number): Uint8Array {
+		const view = new DataView(dst.buffer, dst.byteOffset, 4)
+		view.setInt32(0, v)
+
+		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+	}
+
+	setUint32(dst: Uint8Array, v: number): Uint8Array {
+		const view = new DataView(dst.buffer, dst.byteOffset, 4)
+		view.setUint32(0, v)
+
+		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+	}
+
+	setVint53(dst: Uint8Array, v: number): Uint8Array {
+		if (v <= MAX_U6) {
+			return this.setUint8(dst, v)
+		} else if (v <= MAX_U14) {
+			return this.setUint16(dst, v | 0x4000)
+		} else if (v <= MAX_U30) {
+			return this.setUint32(dst, v | 0x80000000)
+		} else if (v <= MAX_U53) {
+			return this.setUint64(dst, BigInt(v) | 0xc000000000000000n)
+		} else {
+			throw new Error(`overflow, value larger than 53-bits: ${v}`)
+		}
+	}
+
+	setVint62(dst: Uint8Array, v: bigint): Uint8Array {
+		if (v < MAX_U6) {
+			return this.setUint8(dst, Number(v))
+		} else if (v < MAX_U14) {
+			return this.setUint16(dst, Number(v) | 0x4000)
+		} else if (v <= MAX_U30) {
+			return this.setUint32(dst, Number(v) | 0x80000000)
+		} else if (v <= MAX_U62) {
+			return this.setUint64(dst, BigInt(v) | 0xc000000000000000n)
+		} else {
+			throw new Error(`overflow, value larger than 62-bits: ${v}`)
+		}
+	}
+
+	setUint64(dst: Uint8Array, v: bigint): Uint8Array {
+		const view = new DataView(dst.buffer, dst.byteOffset, 8)
+		view.setBigUint64(0, v)
+
+		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+	}
+
+	concatBuffer(bufferArray: (Uint8Array | undefined)[]) {
+		let length = 0
+		bufferArray.forEach((buffer) => {
+			if (buffer === undefined) return
+			length += buffer.length
+		})
+		let offset = 0
+		const result = new Uint8Array(length)
+		bufferArray.forEach((buffer) => {
+			if (buffer === undefined) return
+			result.set(buffer, offset)
+			offset += buffer.length
+		})
+		return result
+	}
+
+	encodeTuple(buffer: Uint8Array, tuple: string[]) {
+		const tupleBytes = new TextEncoder().encode(tuple.join("/"))
+
+		return this.concatBuffer([
+			this.setVint53(buffer, tuple.length),
+			this.setVint53(buffer, tupleBytes.length),
+			tupleBytes,
+		])
+	}
+
+	encodeString(buffer: Uint8Array, str: string): Uint8Array {
+		const strBytes = new TextEncoder().encode(str)
+
+		return this.concatBuffer([this.setVint53(buffer, strBytes.length), strBytes])
 	}
 
 	async write(v: Uint8Array) {
 		await this.#writer.write(v)
 	}
-
+	async tuple(arr: string[]) {
+		await this.u53(arr.length)
+		await this.string(arr.join("/"))
+	}
 	async string(str: string) {
 		const data = new TextEncoder().encode(str)
 		await this.u53(data.byteLength)
@@ -206,65 +317,4 @@ export class Writer {
 		this.#writer.releaseLock()
 		return this.#stream
 	}
-}
-
-function setUint8(dst: Uint8Array, v: number): Uint8Array {
-	dst[0] = v
-	return dst.slice(0, 1)
-}
-
-function setUint16(dst: Uint8Array, v: number): Uint8Array {
-	const view = new DataView(dst.buffer, dst.byteOffset, 2)
-	view.setUint16(0, v)
-
-	return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-}
-
-function setInt32(dst: Uint8Array, v: number): Uint8Array {
-	const view = new DataView(dst.buffer, dst.byteOffset, 4)
-	view.setInt32(0, v)
-
-	return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-}
-
-function setUint32(dst: Uint8Array, v: number): Uint8Array {
-	const view = new DataView(dst.buffer, dst.byteOffset, 4)
-	view.setUint32(0, v)
-
-	return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-}
-
-function setVint53(dst: Uint8Array, v: number): Uint8Array {
-	if (v <= MAX_U6) {
-		return setUint8(dst, v)
-	} else if (v <= MAX_U14) {
-		return setUint16(dst, v | 0x4000)
-	} else if (v <= MAX_U30) {
-		return setUint32(dst, v | 0x80000000)
-	} else if (v <= MAX_U53) {
-		return setUint64(dst, BigInt(v) | 0xc000000000000000n)
-	} else {
-		throw new Error(`overflow, value larger than 53-bits: ${v}`)
-	}
-}
-
-function setVint62(dst: Uint8Array, v: bigint): Uint8Array {
-	if (v < MAX_U6) {
-		return setUint8(dst, Number(v))
-	} else if (v < MAX_U14) {
-		return setUint16(dst, Number(v) | 0x4000)
-	} else if (v <= MAX_U30) {
-		return setUint32(dst, Number(v) | 0x80000000)
-	} else if (v <= MAX_U62) {
-		return setUint64(dst, BigInt(v) | 0xc000000000000000n)
-	} else {
-		throw new Error(`overflow, value larger than 62-bits: ${v}`)
-	}
-}
-
-function setUint64(dst: Uint8Array, v: bigint): Uint8Array {
-	const view = new DataView(dst.buffer, dst.byteOffset, 8)
-	view.setBigUint64(0, v)
-
-	return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
 }

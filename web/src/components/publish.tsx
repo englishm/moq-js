@@ -155,7 +155,7 @@ export default function Publish() {
 			media: d,
 			audio: a,
 			video: v,
-			namespace: name,
+			namespace: [name],
 		})
 	}
 

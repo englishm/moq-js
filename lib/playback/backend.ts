@@ -6,7 +6,7 @@ import { Audio } from "./audio"
 import MediaWorker from "./worker?worker"
 import { RingShared } from "../common/ring"
 import { Root, isAudioTrack } from "../media/catalog"
-import { GroupHeader } from "../transport/objects"
+import { SubgroupHeader } from "../transport/objects"
 
 export interface PlayerConfig {
 	canvas: OffscreenCanvas
@@ -124,7 +124,7 @@ export interface Init {
 export interface Segment {
 	init: string // name of the init track
 	kind: "audio" | "video"
-	header: GroupHeader
+	header: SubgroupHeader
 	buffer: Uint8Array
 	stream: ReadableStream<Uint8Array>
 }
