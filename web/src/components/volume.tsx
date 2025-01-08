@@ -1,11 +1,7 @@
 import { createSignal } from "solid-js"
+import { state } from "src/store/state"
 
-type VolumeControlProps = {
-	mute: (isMuted: boolean) => void
-	setVolume: (newVolume: number) => void
-}
-
-export const VolumeControl = (props: VolumeControlProps) => {
+export const VolumeControl = () => {
 	const [isMuted, setIsMuted] = createSignal(false)
 	const [currentVolume, setCurrentVolume] = createSignal(1)
 	const [previousVolume, setPreviousVolume] = createSignal(1)
@@ -13,16 +9,16 @@ export const VolumeControl = (props: VolumeControlProps) => {
 	const toggleMute = () => {
 		const newIsMuted = !isMuted()
 		setIsMuted(newIsMuted)
-		props.mute(newIsMuted)
+		state.mute(newIsMuted)
 
 		if (newIsMuted) {
 			setPreviousVolume(currentVolume())
-			props.setVolume(0)
+			state.setVolume(0)
 			setCurrentVolume(0)
 		} else {
 			const restoredVolume = previousVolume()
 			setCurrentVolume(restoredVolume)
-			props.setVolume(restoredVolume)
+			state.setVolume(restoredVolume)
 		}
 	}
 
@@ -34,7 +30,7 @@ export const VolumeControl = (props: VolumeControlProps) => {
 			setIsMuted(false)
 		}
 		setCurrentVolume(volume)
-		props.setVolume(volume)
+		state.setVolume(volume)
 	}
 
 	return (
