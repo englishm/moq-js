@@ -1,7 +1,7 @@
 import * as Control from "./control"
 import { Queue, Watch } from "../common/async"
 import { Objects } from "./objects"
-import type { TrackReader, GroupReader, ObjectReader } from "./objects"
+import type { TrackReader, SubgroupReader } from "./objects"
 
 export class Subscriber {
 	// Use to send control messages.
@@ -46,14 +46,14 @@ export class Subscriber {
 	}
 
 	async recvAnnounce(msg: Control.Announce) {
-		if (this.#announce.has(msg.namespace)) {
-			throw new Error(`duplicate announce for namespace: ${msg.namespace}`)
+		if (this.#announce.has(msg.namespace.join("/"))) {
+			throw new Error(`duplicate announce for namespace: ${msg.namespace.join("/")}`)
 		}
 
 		await this.#control.send({ kind: Control.Msg.AnnounceOk, namespace: msg.namespace })
 
 		const announce = new AnnounceRecv(this.#control, msg.namespace)
-		this.#announce.set(msg.namespace, announce)
+		this.#announce.set(msg.namespace.join("/"), announce)
 
 		this.#announceQueue.update((queue) => [...queue, announce])
 	}
@@ -62,7 +62,7 @@ export class Subscriber {
 		throw new Error(`TODO Unannounce`)
 	}
 
-	async subscribe(namespace: string, track: string) {
+	async subscribe(namespace: string[], track: string) {
 		const id = this.#subscribeNext++
 
 		const subscribe = new SubscribeSend(this.#control, id, namespace, track)
@@ -131,7 +131,7 @@ export class Subscriber {
 		await subscribe.onError(msg.code, msg.reason)
 	}
 
-	async recvObject(reader: TrackReader | GroupReader | ObjectReader) {
+	async recvObject(reader: TrackReader | SubgroupReader) {
 		const subscribe = this.#subscribe.get(reader.header.track)
 		if (!subscribe) {
 			throw new Error(`data for for unknown track: ${reader.header.track}`)
@@ -144,12 +144,12 @@ export class Subscriber {
 export class AnnounceRecv {
 	#control: Control.Stream
 
-	readonly namespace: string
+	readonly namespace: string[]
 
 	// The current state of the announce
 	#state: "init" | "ack" | "closed" = "init"
 
-	constructor(control: Control.Stream, namespace: string) {
+	constructor(control: Control.Stream, namespace: string[]) {
 		this.#control = control // so we can send messages
 		this.namespace = namespace
 	}
@@ -175,13 +175,13 @@ export class SubscribeSend {
 	#control: Control.Stream
 	#id: bigint
 
-	readonly namespace: string
+	readonly namespace: string[]
 	readonly track: string
 
 	// A queue of received streams for this subscription.
-	#data = new Queue<TrackReader | GroupReader | ObjectReader>()
+	#data = new Queue<TrackReader | SubgroupReader>()
 
-	constructor(control: Control.Stream, id: bigint, namespace: string, track: string) {
+	constructor(control: Control.Stream, id: bigint, namespace: string[], track: string) {
 		this.#control = control // so we can send messages
 		this.#id = id
 		this.namespace = namespace
@@ -210,7 +210,7 @@ export class SubscribeSend {
 		return await this.#data.abort(err)
 	}
 
-	async onData(reader: TrackReader | GroupReader | ObjectReader) {
+	async onData(reader: TrackReader | SubgroupReader) {
 		if (!this.#data.closed()) await this.#data.push(reader)
 	}
 

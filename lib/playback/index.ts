@@ -7,7 +7,7 @@ import { asError } from "../common/error"
 import Backend from "./backend"
 
 import { Client } from "../transport/client"
-import { GroupReader } from "../transport/objects"
+import { SubgroupReader } from "../transport/objects"
 
 export type Range = Message.Range
 export type Timeline = Message.Timeline
@@ -71,7 +71,7 @@ export default class Player {
 		const client = new Client({ url: config.url, fingerprint: config.fingerprint, role: "subscriber" })
 		const connection = await client.connect()
 
-		const catalog = await Catalog.fetch(connection, config.namespace)
+		const catalog = await Catalog.fetch(connection, [config.namespace])
 		console.log("catalog", catalog)
 
 		const canvas = config.canvas.transferControlToOffscreen()
@@ -81,13 +81,15 @@ export default class Player {
 	}
 
 	async #run() {
+		// Key is "/" serialized namespace for lookup ease
+		// Value is Track.initTrack. @todo: type this properly
 		const inits = new Set<[string, string]>()
 		const tracks = new Array<Catalog.Track>()
 
 		this.#catalog.tracks.forEach((track, index) => {
 			if (index == this.#tracknum || Catalog.isAudioTrack(track)) {
 				if (!track.namespace) throw new Error("track has no namespace")
-				if (track.initTrack) inits.add([track.namespace, track.initTrack])
+				if (track.initTrack) inits.add([track.namespace.join("/"), track.initTrack])
 				tracks.push(track)
 			}
 		})
@@ -103,7 +105,7 @@ export default class Player {
 	}
 
 	async #runInit(namespace: string, name: string) {
-		const sub = await this.#connection.subscribe(namespace, name)
+		const sub = await this.#connection.subscribe([namespace], name)
 		try {
 			const init = await Promise.race([sub.data(), this.#running])
 			if (!init) throw new Error("no init data")
@@ -143,7 +145,7 @@ export default class Player {
 				const segment = await Promise.race([sub.data(), this.#running])
 				if (!segment) continue
 
-				if (!(segment instanceof GroupReader)) {
+				if (!(segment instanceof SubgroupReader)) {
 					throw new Error(`expected group reader for segment: ${track.name}`)
 				}
 
@@ -281,6 +283,7 @@ export default class Player {
 		try {
 			await this.#running
 		} catch (e) {
+			console.error("Error in Player.closed():", e)
 			return asError(e)
 		}
 	}

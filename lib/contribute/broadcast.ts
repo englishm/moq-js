@@ -7,7 +7,7 @@ import * as Catalog from "../media/catalog"
 import { isAudioTrackSettings, isVideoTrackSettings } from "../common/settings"
 
 export interface BroadcastConfig {
-	namespace: string
+	namespace: string[]
 	connection: Connection
 	media: MediaStream
 
@@ -26,7 +26,7 @@ export class Broadcast {
 	readonly config: BroadcastConfig
 	readonly catalog: Catalog.Root
 	readonly connection: Connection
-	readonly namespace: string
+	readonly namespace: string[]
 
 	#running: Promise<void>
 
@@ -148,7 +148,7 @@ export class Broadcast {
 		// Send a SUBSCRIBE_OK
 		await subscriber.ack()
 
-		const stream = await subscriber.group({ group: 0 })
+		const stream = await subscriber.subgroup({ group: 0, subgroup: 0 })
 		await stream.write({ object: 0, payload: bytes })
 		await stream.close()
 	}
@@ -162,7 +162,7 @@ export class Broadcast {
 
 		const init = await track.init()
 
-		const stream = await subscriber.group({ group: 0 })
+		const stream = await subscriber.subgroup({ group: 0, subgroup: 0 })
 		await stream.write({ object: 0, payload: init })
 		await stream.close()
 	}
@@ -190,8 +190,9 @@ export class Broadcast {
 
 	async #serveSegment(subscriber: SubscribeRecv, segment: Segment) {
 		// Create a new stream for each segment.
-		const stream = await subscriber.group({
+		const stream = await subscriber.subgroup({
 			group: segment.id,
+			subgroup: 0, // @todo: figure out the right way to do this
 			priority: 127, // TODO,default to mid value, see: https://github.com/moq-wg/moq-transport/issues/504
 		})
 

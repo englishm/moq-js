@@ -1,6 +1,6 @@
 import * as Control from "./control"
 import { Queue, Watch } from "../common/async"
-import { Objects, GroupWriter, ObjectWriter, StreamType, TrackWriter } from "./objects"
+import { Objects, SubgroupWriter, StreamType, TrackWriter } from "./objects"
 
 export class Publisher {
 	// Used to send control messages
@@ -22,13 +22,13 @@ export class Publisher {
 	}
 
 	// Announce a track namespace.
-	async announce(namespace: string): Promise<AnnounceSend> {
-		if (this.#announce.has(namespace)) {
-			throw new Error(`already announce: ${namespace}`)
+	async announce(namespace: string[]): Promise<AnnounceSend> {
+		if (this.#announce.has(namespace.join("/"))) {
+			throw new Error(`already announced: ${namespace.join("/")}`)
 		}
 
 		const announce = new AnnounceSend(this.#control, namespace)
-		this.#announce.set(namespace, announce)
+		this.#announce.set(namespace.join("/"), announce)
 
 		await this.#control.send({
 			kind: Control.Msg.Announce,
@@ -58,19 +58,19 @@ export class Publisher {
 	}
 
 	recvAnnounceOk(msg: Control.AnnounceOk) {
-		const announce = this.#announce.get(msg.namespace)
+		const announce = this.#announce.get(msg.namespace.join("/"))
 		if (!announce) {
-			throw new Error(`announce OK for unknown announce: ${msg.namespace}`)
+			throw new Error(`announce OK for unknown announce: ${msg.namespace.join("/")}`)
 		}
 
 		announce.onOk()
 	}
 
 	recvAnnounceError(msg: Control.AnnounceError) {
-		const announce = this.#announce.get(msg.namespace)
+		const announce = this.#announce.get(msg.namespace.join("/"))
 		if (!announce) {
 			// TODO debug this
-			console.warn(`announce error for unknown announce: ${msg.namespace}`)
+			console.warn(`announce error for unknown announce: ${msg.namespace.join("/")}`)
 			return
 		}
 
@@ -102,12 +102,12 @@ export class Publisher {
 export class AnnounceSend {
 	#control: Control.Stream
 
-	readonly namespace: string
+	readonly namespace: string[]
 
 	// The current state, updated by control messages.
 	#state = new Watch<"init" | "ack" | Error>("init")
 
-	constructor(control: Control.Stream, namespace: string) {
+	constructor(control: Control.Stream, namespace: string[]) {
 		this.#control = control
 		this.namespace = namespace
 	}
@@ -164,7 +164,7 @@ export class SubscribeRecv {
 	#subscriberPriority: number
 	groupOrder: Control.GroupOrder
 
-	readonly namespace: string
+	readonly namespace: string[]
 	readonly track: string
 
 	// The current state of the subscription.
@@ -218,27 +218,15 @@ export class SubscribeRecv {
 		})
 	}
 
-	// Create a writable data stream for a group within the track
-	async group(props: { group: number; priority?: number }): Promise<GroupWriter> {
+	// Create a writable data stream for a subgroup within the track
+	async subgroup(props: { group: number; subgroup: number; priority?: number }): Promise<SubgroupWriter> {
 		return this.#objects.send({
-			type: StreamType.Group,
+			type: StreamType.Subgroup,
 			sub: this.#id,
 			track: this.#trackId,
 			group: props.group,
+			subgroup: props.subgroup,
 			publisher_priority: props.priority ?? 127,
-		})
-	}
-
-	// Create a writable data stream for a single object within the track
-	async object(props: { group: number; object: number; priority?: number }): Promise<ObjectWriter> {
-		return this.#objects.send({
-			type: StreamType.Object,
-			sub: this.#id,
-			track: this.#trackId,
-			group: props.group,
-			object: props.object,
-			publisher_priority: props.priority ?? 127,
-			status: 0,
 		})
 	}
 }

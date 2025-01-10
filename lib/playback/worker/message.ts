@@ -1,4 +1,4 @@
-import { GroupHeader } from "../../transport/objects"
+import { SubgroupHeader } from "../../transport/objects"
 import { RingShared } from "../../common/ring"
 
 export interface Config {
@@ -25,7 +25,7 @@ export interface Init {
 export interface Segment {
 	init: string // name of the init object
 	kind: "audio" | "video"
-	header: GroupHeader
+	header: SubgroupHeader
 	buffer: Uint8Array
 	stream: ReadableStream<Uint8Array>
 }
