@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Player Component</title>
+	</head>
+	<body>
+		<h1>Web Component Advanced Example</h1>
+		<!-- Using the script player component -->
+
+		<div id="video-moq" style="width: 640px"></div>
+		<script type="module">
+			import VideoMoq from "/moq-player/moq-player.esm.js";
+
+			var video = document.getElementById("video-moq");
+			var videoSrc = "https://localhost:4443?namespace=bbb&fingerprint=https://localhost:4443/fingerprint";
+
+			var player = new VideoMoq();
+			player.src = videoSrc;
+			player.trackNum = 0;
+			player.controls = true;
+
+			video.appendChild(player); // load is triggered by web component lifecycle
+			// After that you will get full control to player change tracks, volume, etc.
+		</script>
+	</body>
+</html>

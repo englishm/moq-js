@@ -13,10 +13,14 @@ app.use((req, res, next) => {
 	next();
 });
 
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(__dirname));
 
 const moqPath = path.resolve(__dirname, "../lib/dist");
 app.use("/moq-player", express.static(moqPath));
+
+app.get("/", (req, res) => {
+	res.sendFile(path.join(__dirname, "index.html"));
+});
 
 app.listen(PORT, () => {
 	console.log(`Server running in http://localhost:${PORT}`);

@@ -5,7 +5,7 @@
 	"workspaces": [
 		"lib",
 		"web",
-		"simple-web"
+		"samples"
 	],
 	"scripts": {
 		"dev:moq-player": "npm run dev --workspace=moq-player",
