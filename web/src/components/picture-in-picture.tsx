@@ -1,11 +1,7 @@
 import { onCleanup } from "solid-js"
 import { state, setState } from "src/store/state"
 
-type PictureInPictureButtonProps = {
-	play: () => void
-}
-
-export const PictureInPictureButton = (props: PictureInPictureButtonProps) => {
+export const PictureInPictureButton = () => {
 	let videoCanvasElement: HTMLElement | null
 	let pipWindow: WindowWithPiP | null
 
@@ -51,7 +47,7 @@ export const PictureInPictureButton = (props: PictureInPictureButtonProps) => {
 					videoCanvasElement.style.width = "100%"
 					videoCanvasElement.style.height = "100%"
 					// @todo add custom controls to the PiP window
-					videoCanvasElement.onclick = () => props.play()
+					videoCanvasElement.onclick = () => state.handlePlayPause()
 
 					handleEnterPip()
 

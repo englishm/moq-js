@@ -1,5 +1,5 @@
 import { createStore } from "solid-js/store"
-import { Player } from "@kixelated/moq/playback"
+import Player from "moq-player/simple-player"
 
 export const [state, setState] = createStore({
 	player: null as Player | null,
