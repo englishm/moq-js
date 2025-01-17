@@ -43,7 +43,7 @@ export class Connection {
 		await Promise.all([this.#runControl(), this.#runObjects()])
 	}
 
-	announce(namespace: string) {
+	announce(namespace: string[]) {
 		return this.#publisher.announce(namespace)
 	}
 
@@ -51,7 +51,7 @@ export class Connection {
 		return this.#subscriber.announced()
 	}
 
-	subscribe(namespace: string, track: string) {
+	subscribe(namespace: string[], track: string) {
 		return this.#subscriber.subscribe(namespace, track)
 	}
 

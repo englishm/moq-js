@@ -1,12 +1,12 @@
-/// <reference types="vite/client" />
-
 import * as Message from "./worker/message"
 import { Audio } from "./audio"
 
-import MediaWorker from "./worker?worker"
+// import WebWorker from 'web-worker:./Worker.ts';
+import MediaWorker from "web-worker:./worker/index.ts"
+
 import { RingShared } from "../common/ring"
 import { Root, isAudioTrack } from "../media/catalog"
-import { GroupHeader } from "../transport/objects"
+import { SubgroupHeader } from "../transport/objects"
 
 export interface PlayerConfig {
 	canvas: OffscreenCanvas
@@ -26,8 +26,7 @@ export default class Backend {
 
 	constructor(config: PlayerConfig) {
 		// TODO does this block the main thread? If so, make this async
-		// @ts-expect-error: The Vite typing is wrong https://github.com/vitejs/vite/blob/22bd67d70a1390daae19ca33d7de162140d533d6/packages/vite/client.d.ts#L182
-		this.#worker = new MediaWorker({ format: "es" })
+		this.#worker = new MediaWorker()
 		this.#worker.addEventListener("message", this.on.bind(this))
 
 		let sampleRate: number | undefined
@@ -124,7 +123,7 @@ export interface Init {
 export interface Segment {
 	init: string // name of the init track
 	kind: "audio" | "video"
-	header: GroupHeader
+	header: SubgroupHeader
 	buffer: Uint8Array
 	stream: ReadableStream<Uint8Array>
 }

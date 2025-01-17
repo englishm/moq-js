@@ -10,8 +10,14 @@ export enum Version {
 	DRAFT_03 = 0xff000003,
 	DRAFT_04 = 0xff000004,
 	DRAFT_05 = 0xff000005,
+	DRAFT_06 = 0xff000006,
 	KIXEL_00 = 0xbad00,
 	KIXEL_01 = 0xbad01,
+}
+
+enum SetupType {
+	Client = 0x40,
+	Server = 0x41,
 }
 
 // NOTE: These are forked from moq-transport-00.
@@ -50,8 +56,8 @@ export class Decoder {
 	}
 
 	async client(): Promise<Client> {
-		const type = await this.r.u53()
-		if (type !== 0x40) throw new Error(`client SETUP type must be 0x40, got ${type}`)
+		const type: SetupType = await this.r.u53()
+		if (type !== SetupType.Client) throw new Error(`client SETUP type must be ${SetupType.Client}, got ${type}`)
 
 		const count = await this.r.u53()
 
@@ -72,8 +78,13 @@ export class Decoder {
 	}
 
 	async server(): Promise<Server> {
-		const type = await this.r.u53()
-		if (type !== 0x41) throw new Error(`server SETUP type must be 0x41, got ${type}`)
+		const type: SetupType = await this.r.u53()
+		if (type !== SetupType.Server) throw new Error(`server SETUP type must be ${SetupType.Server}, got ${type}`)
+
+		const advertisedLength = await this.r.u53()
+		if (advertisedLength !== this.r.getByteLength()) {
+			throw new Error(`server SETUP message length mismatch: ${advertisedLength} != ${this.r.getByteLength()}`)
+		}
 
 		const version = await this.r.u53()
 		const params = await this.parameters()
@@ -130,35 +141,52 @@ export class Encoder {
 	}
 
 	async client(c: Client) {
-		await this.w.u53(0x40)
-		await this.w.u53(c.versions.length)
-		for (const v of c.versions) {
-			await this.w.u53(v)
-		}
+		let len = 0
+		const msg: Uint8Array[] = []
+
+		const { versionBytes, versionPayload } = this.buildVersions(c.versions)
+		len += versionBytes
+		msg.push(...versionPayload)
 
 		// I hate it
 		const params = c.params ?? new Map()
 		params.set(0n, new Uint8Array([c.role == "publisher" ? 1 : c.role == "subscriber" ? 2 : 3]))
-		await this.parameters(params)
-	}
+		const { paramData, totalBytes } = this.buildParameters(params)
+		len += totalBytes
+		msg.push(...paramData)
 
-	async server(s: Server) {
-		await this.w.u53(0x41)
-		await this.w.u53(s.version)
-		await this.parameters(s.params)
-	}
+		const messageType = this.w.setVint53(new Uint8Array(8), SetupType.Client)
+		const messageLength = this.w.setVint53(new Uint8Array(8), len)
 
-	private async parameters(p: Parameters | undefined) {
-		if (!p) {
-			await this.w.u8(0)
-			return
+		for (const elem of [messageType, messageLength, ...msg]) {
+			await this.w.write(elem)
 		}
+	}
 
-		await this.w.u53(p.size)
+	private buildVersions(versions: Version[]) {
+		let versionBytes = 0
+		const versionPayload = []
+
+		const versionLength = this.w.setVint53(new Uint8Array(8), versions.length)
+		versionPayload.push(versionLength)
+		versionBytes += versionLength.length
+
+		for (const v of versions) {
+			const version = this.w.setVint53(new Uint8Array(8), v)
+			versionPayload.push(version)
+			versionBytes += version.length
+		}
+		return { versionBytes, versionPayload }
+	}
+
+	private buildParameters(p: Parameters | undefined): { paramData: Uint8Array[]; totalBytes: number } {
+		if (!p) return { paramData: [this.w.setUint8(new Uint8Array(8), 0)], totalBytes: 0 }
+		const paramBytes = [this.w.setVint53(new Uint8Array(8), p.size)]
 		for (const [id, value] of p) {
-			await this.w.u62(id)
-			await this.w.u53(value.length)
-			await this.w.write(value)
+			const idBytes = this.w.setVint62(new Uint8Array(8), id)
+			const sizeBytes = this.w.setVint53(new Uint8Array(8), value.length)
+			paramBytes.push(idBytes, sizeBytes, value)
 		}
+		return { paramData: paramBytes, totalBytes: paramBytes.reduce((acc, curr) => acc + curr.length, 0) }
 	}
 }

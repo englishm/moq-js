@@ -74,7 +74,7 @@ export class Container {
 		this.#track = this.#mp4.addTrack(options)
 		if (!this.#track) throw new Error("failed to initialize MP4 track")
 
-		const buffer = MP4.ISOFile.writeInitializationSegment(this.#mp4.ftyp!, this.#mp4.moov!, 0, 0)
+		const buffer = MP4.ISOFile.writeInitializationSegment(this.#mp4.ftyp, this.#mp4.moov, 0, 0)
 		const data = new Uint8Array(buffer)
 
 		controller.enqueue({

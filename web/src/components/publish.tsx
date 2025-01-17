@@ -1,5 +1,5 @@
-import { Broadcast, VideoEncoder, AudioEncoder } from "@kixelated/moq/contribute"
-import { Client, Connection } from "@kixelated/moq/transport"
+// import { Broadcast, VideoEncoder, AudioEncoder } from "@kixelated/moq/contribute"
+// import { Client, Connection } from "@kixelated/moq/transport"
 import {
 	createSignal,
 	createEffect,
@@ -155,7 +155,7 @@ export default function Publish() {
 			media: d,
 			audio: a,
 			video: v,
-			namespace: name,
+			namespace: [name],
 		})
 	}
 
@@ -420,7 +420,7 @@ function Device(props: {
 							},
 							sampleRate: { ideal: 48_000 },
 							deviceId: audioDeviceId(),
-					  },
+						},
 			video: videoDeviceId() === "disabled" ? false : videoTrackConstraints,
 		})
 	}

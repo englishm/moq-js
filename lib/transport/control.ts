@@ -63,7 +63,7 @@ export interface Subscribe {
 
 	id: bigint
 	trackId: bigint
-	namespace: string
+	namespace: string[]
 	name: string
 	subscriber_priority: number
 	group_order: GroupOrder
@@ -111,6 +111,7 @@ export interface SubscribeOk {
 	expires: bigint
 	group_order: GroupOrder
 	latest?: [number, number]
+	params?: Parameters
 }
 
 export interface SubscribeDone {
@@ -126,6 +127,7 @@ export interface SubscribeError {
 	id: bigint
 	code: bigint
 	reason: string
+	//trackAlias?: bigint
 }
 
 export interface Unsubscribe {
@@ -135,25 +137,25 @@ export interface Unsubscribe {
 
 export interface Announce {
 	kind: Msg.Announce
-	namespace: string
+	namespace: string[]
 	params?: Parameters
 }
 
 export interface AnnounceOk {
 	kind: Msg.AnnounceOk
-	namespace: string
+	namespace: string[]
 }
 
 export interface AnnounceError {
 	kind: Msg.AnnounceError
-	namespace: string
+	namespace: string[]
 	code: bigint
 	reason: string
 }
 
 export interface Unannounce {
 	kind: Msg.Unannounce
-	namespace: string
+	namespace: string[]
 }
 
 export class Stream {
@@ -211,7 +213,17 @@ export class Decoder {
 
 	private async msg(): Promise<Msg> {
 		const t = await this.r.u53()
-		switch (t) {
+
+		const advertisedLength = await this.r.u53()
+		if (advertisedLength !== this.r.getByteLength()) {
+			// @todo: throw this error and close the session
+			// "If the length does not match the length of the message content, the receiver MUST close the session."
+			console.error(
+				`message length mismatch: advertised ${advertisedLength} != ${this.r.getByteLength()} received`,
+			)
+		}
+
+		switch (t as Id) {
 			case Id.Subscribe:
 				return Msg.Subscribe
 			case Id.SubscribeOk:
@@ -268,7 +280,7 @@ export class Decoder {
 			kind: Msg.Subscribe,
 			id: await this.r.u62(),
 			trackId: await this.r.u62(),
-			namespace: await this.r.string(),
+			namespace: await this.r.tuple(),
 			name: await this.r.string(),
 			subscriber_priority: await this.r.u8(),
 			group_order: await this.decodeGroupOrder(),
@@ -350,17 +362,20 @@ export class Decoder {
 
 		const flag = await this.r.u8()
 		if (flag === 1) {
+			//       [largest group id,   largest object id]
 			latest = [await this.r.u53(), await this.r.u53()]
 		} else if (flag !== 0) {
 			throw new Error(`invalid final flag: ${flag}`)
 		}
-
+		// @todo: actually consume params once we implement them in moq-rs
+		const params = await this.parameters()
 		return {
 			kind: Msg.SubscribeOk,
 			id,
 			expires,
 			group_order,
 			latest,
+			params,
 		}
 	}
 
@@ -404,7 +419,7 @@ export class Decoder {
 	}
 
 	private async announce(): Promise<Announce> {
-		const namespace = await this.r.string()
+		const namespace = await this.r.tuple()
 
 		return {
 			kind: Msg.Announce,
@@ -416,14 +431,14 @@ export class Decoder {
 	private async announce_ok(): Promise<AnnounceOk> {
 		return {
 			kind: Msg.AnnounceOk,
-			namespace: await this.r.string(),
+			namespace: await this.r.tuple(),
 		}
 	}
 
 	private async announce_error(): Promise<AnnounceError> {
 		return {
 			kind: Msg.AnnounceError,
-			namespace: await this.r.string(),
+			namespace: await this.r.tuple(),
 			code: await this.r.u62(),
 			reason: await this.r.string(),
 		}
@@ -432,7 +447,7 @@ export class Decoder {
 	private async unannounce(): Promise<Unannounce> {
 		return {
 			kind: Msg.Unannounce,
-			namespace: await this.r.string(),
+			namespace: await this.r.tuple(),
 		}
 	}
 }
@@ -468,129 +483,190 @@ export class Encoder {
 	}
 
 	async subscribe(s: Subscribe) {
-		await this.w.u53(Id.Subscribe)
-		await this.w.u62(s.id)
-		await this.w.u62(s.trackId)
-		await this.w.string(s.namespace)
-		await this.w.string(s.name)
-		await this.w.u8(s.subscriber_priority ?? 127)
-		await this.encodeGroupOrder(s.group_order ?? GroupOrder.Publisher)
-		await this.location(s.location)
-		await this.parameters(s.params)
-	}
+		const buffer = new Uint8Array(8)
 
-	private async encodeGroupOrder(order: GroupOrder) {
-		switch (order) {
-			case GroupOrder.Publisher:
-				await this.w.u8(GroupOrder.Publisher)
-				break
-			case GroupOrder.Ascending:
-				await this.w.u8(GroupOrder.Ascending)
-				break
-			case GroupOrder.Descending:
-				await this.w.u8(GroupOrder.Descending)
-				break
-			default:
-				throw new Error("Invalid GroupOrder value")
-		}
-	}
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, s.id),
+			this.w.setVint62(buffer, s.trackId),
+			this.w.encodeTuple(buffer, s.namespace),
+			this.w.encodeString(buffer, s.name),
+			this.w.setUint8(buffer, s.subscriber_priority ?? 127),
+			this.w.setUint8(buffer, s.group_order ?? GroupOrder.Publisher),
+			this.encodeLocation(buffer, s.location),
+			this.encodeParameters(buffer, s.params),
+		])
 
-	private async location(l: Location) {
-		switch (l.mode) {
-			case "latest_group":
-				await this.w.u62(1n)
-				break
-			case "latest_object":
-				await this.w.u62(2n)
-				break
-			case "absolute_start":
-				await this.w.u62(3n)
-				await this.w.u53(l.start_group)
-				await this.w.u53(l.start_object)
-				break
-			case "absolute_range":
-				await this.w.u62(3n)
-				await this.w.u53(l.start_group)
-				await this.w.u53(l.start_object)
-				await this.w.u53(l.end_group)
-				await this.w.u53(l.end_object)
-		}
-	}
+		const messageType = this.w.setVint53(buffer, Id.Subscribe)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
 
-	private async parameters(p: Parameters | undefined) {
-		if (!p) {
-			await this.w.u8(0)
-			return
-		}
-
-		await this.w.u53(p.size)
-		for (const [id, value] of p) {
-			await this.w.u62(id)
-			await this.w.u53(value.length)
-			await this.w.write(value)
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
 		}
 	}
 
 	async subscribe_ok(s: SubscribeOk) {
-		await this.w.u53(Id.SubscribeOk)
-		await this.w.u62(s.id)
-		await this.w.u62(s.expires)
+		const buffer = new Uint8Array(8)
 
-		await this.encodeGroupOrder(s.group_order)
-		if (s.latest !== undefined) {
-			await this.w.u8(1)
-			await this.w.u53(s.latest[0])
-			await this.w.u53(s.latest[1])
-		} else {
-			await this.w.u8(0)
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, s.id),
+			this.w.setVint62(buffer, s.expires),
+			this.w.setUint8(buffer, s.group_order),
+			this.w.setUint8(buffer, s.latest !== undefined ? 1 : 0),
+			s.latest && this.w.setVint53(buffer, s.latest[0]),
+			s.latest && this.w.setVint53(buffer, s.latest[1]),
+			this.encodeParameters(buffer, s.params),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.SubscribeOk)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
 		}
 	}
 
 	async subscribe_done(s: SubscribeDone) {
-		await this.w.u53(Id.SubscribeDone)
-		await this.w.u62(s.id)
-		await this.w.u62(s.code)
-		await this.w.string(s.reason)
+		const buffer = new Uint8Array(8)
 
-		if (s.final !== undefined) {
-			await this.w.u8(1)
-			await this.w.u53(s.final[0])
-			await this.w.u53(s.final[1])
-		} else {
-			await this.w.u8(0)
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, s.id),
+			this.w.setVint62(buffer, s.code),
+			this.w.encodeString(buffer, s.reason),
+			this.w.setUint8(buffer, s.final !== undefined ? 1 : 0),
+			s.final && this.w.setVint53(buffer, s.final[0]),
+			s.final && this.w.setVint53(buffer, s.final[1]),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.SubscribeDone)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
 		}
 	}
 
 	async subscribe_error(s: SubscribeError) {
-		await this.w.u53(Id.SubscribeError)
-		await this.w.u62(s.id)
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, s.id),
+			this.w.setVint62(buffer, s.code),
+			this.w.encodeString(buffer, s.reason),
+			//@todo: add trackAlias if error code is 'Retry Track Alias'
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.SubscribeError)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
 	}
 
 	async unsubscribe(s: Unsubscribe) {
-		await this.w.u53(Id.Unsubscribe)
-		await this.w.u62(s.id)
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([this.w.setVint62(buffer, s.id)])
+
+		const messageType = this.w.setVint53(buffer, Id.Unsubscribe)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
 	}
 
 	async announce(a: Announce) {
-		await this.w.u53(Id.Announce)
-		await this.w.string(a.namespace)
-		await this.w.u53(0) // parameters
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([
+			this.w.encodeTuple(buffer, a.namespace),
+			this.encodeParameters(buffer, a.params),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.Announce)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
 	}
 
 	async announce_ok(a: AnnounceOk) {
-		await this.w.u53(Id.AnnounceOk)
-		await this.w.string(a.namespace)
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([this.w.encodeTuple(buffer, a.namespace)])
+
+		const messageType = this.w.setVint53(buffer, Id.AnnounceOk)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
 	}
 
 	async announce_error(a: AnnounceError) {
-		await this.w.u53(Id.AnnounceError)
-		await this.w.string(a.namespace)
-		await this.w.u62(a.code)
-		await this.w.string(a.reason)
+		const buffer = new Uint8Array(8)
+		const msgData = this.w.concatBuffer([
+			this.w.encodeTuple(buffer, a.namespace),
+			this.w.setVint62(buffer, a.code),
+			this.w.encodeString(buffer, a.reason),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.AnnounceError)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
 	}
 
 	async unannounce(a: Unannounce) {
-		await this.w.u53(Id.Unannounce)
-		await this.w.string(a.namespace)
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([this.w.encodeTuple(buffer, a.namespace)])
+
+		const messageType = this.w.setVint53(buffer, Id.Unannounce)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
+	}
+
+	private encodeLocation(buffer: Uint8Array, l: Location): Uint8Array {
+		switch (l.mode) {
+			case "latest_group":
+				return this.w.setVint62(buffer, 1n)
+			case "latest_object":
+				return this.w.setVint62(buffer, 2n)
+			case "absolute_start":
+				return this.w.concatBuffer([
+					this.w.setVint62(buffer, 3n),
+					this.w.setVint53(buffer, l.start_group),
+					this.w.setVint53(buffer, l.start_object),
+				])
+			case "absolute_range":
+				return this.w.concatBuffer([
+					this.w.setVint62(buffer, 3n),
+					this.w.setVint53(buffer, l.start_group),
+					this.w.setVint53(buffer, l.start_object),
+					this.w.setVint53(buffer, l.end_group),
+					this.w.setVint53(buffer, l.end_object),
+				])
+		}
+	}
+
+	private encodeParameters(buffer: Uint8Array, p: Parameters | undefined): Uint8Array {
+		if (!p) return this.w.setUint8(buffer, 0)
+
+		const paramFields = [this.w.setVint53(buffer, p.size)]
+		for (const [id, value] of p) {
+			const idBytes = this.w.setVint62(buffer, id)
+			const sizeBytes = this.w.setVint53(buffer, value.length)
+			paramFields.push(idBytes, sizeBytes, value)
+		}
+
+		return this.w.concatBuffer(paramFields)
 	}
 }

@@ -36,4 +36,5 @@ export const [state, setState] = createStore({
 		if (!playerInstance) return
 		void playerInstance.setVolume(newVolume)
 	},
+	pipActive: false,
 })

@@ -1,10 +1,13 @@
 import { Reader, Writer } from "./stream"
 export { Reader, Writer }
 
+// Each stream type is prefixed with the given VarInt type.
+// https://www.ietf.org/archive/id/draft-ietf-moq-transport-06.html#section-7
 export enum StreamType {
-	Object = 0x0,
-	Track = 0x50,
-	Group = 0x51,
+	// Datagram = 0x1, // No datagram support
+	Track = 0x2, // Deprecated in DRAFT_07
+	Subgroup = 0x4,
+	// Fetch = 0x5, // Added in DRAFT_07
 }
 
 export enum Status {
@@ -24,43 +27,26 @@ export interface TrackHeader {
 export interface TrackChunk {
 	group: number // The group sequence, as a number because 2^53 is enough.
 	object: number
+	status?: Status // Only sent if Object Payload Length is zero
 	payload: Uint8Array | Status
 }
 
-export interface GroupHeader {
-	type: StreamType.Group
+export interface SubgroupHeader {
+	type: StreamType.Subgroup
 	sub: bigint
 	track: bigint
 	group: number // The group sequence, as a number because 2^53 is enough.
+	subgroup: number // The subgroup sequence, as a number because 2^53 is enough.
 	publisher_priority: number // VarInt with a u32 maximum value
 }
 
-export interface GroupChunk {
+export interface SubgroupChunk {
 	object: number
+	status?: Status // Only sent if Object Payload Length is zero
 	payload: Uint8Array | Status
 }
 
-export interface ObjectHeader {
-	type: StreamType.Object
-	sub: bigint
-	track: bigint
-	group: number
-	object: number
-	publisher_priority: number
-	status: number
-}
-
-export interface ObjectChunk {
-	payload: Uint8Array
-}
-
-type WriterType<T> = T extends TrackHeader
-	? TrackWriter
-	: T extends GroupHeader
-	? GroupWriter
-	: T extends ObjectHeader
-	? ObjectWriter
-	: never
+type WriterType<T> = T extends TrackHeader ? TrackWriter : T extends SubgroupHeader ? SubgroupWriter : never
 
 export class Objects {
 	private quic: WebTransport
@@ -69,7 +55,7 @@ export class Objects {
 		this.quic = quic
 	}
 
-	async send<T extends TrackHeader | GroupHeader | ObjectHeader>(h: T): Promise<WriterType<T>> {
+	async send<T extends TrackHeader | SubgroupHeader>(h: T): Promise<WriterType<T>> {
 		const stream = await this.quic.createUnidirectionalStream()
 		const w = new Writer(stream)
 
@@ -79,18 +65,12 @@ export class Objects {
 
 		let res: WriterType<T>
 
-		if (h.type == StreamType.Object) {
+		if (h.type === StreamType.Subgroup) {
 			await w.u53(h.group)
-			await w.u53(h.object)
-			await w.u8(h.publisher_priority)
-			await w.u53(h.status)
-
-			res = new ObjectWriter(h, w) as WriterType<T>
-		} else if (h.type === StreamType.Group) {
-			await w.u53(h.group)
+			await w.u53(h.subgroup)
 			await w.u8(h.publisher_priority)
 
-			res = new GroupWriter(h, w) as WriterType<T>
+			res = new SubgroupWriter(h, w) as WriterType<T>
 		} else if (h.type === StreamType.Track) {
 			await w.u8(h.publisher_priority)
 
@@ -104,7 +84,7 @@ export class Objects {
 		return res
 	}
 
-	async recv(): Promise<TrackReader | GroupReader | ObjectReader | undefined> {
+	async recv(): Promise<TrackReader | SubgroupReader | undefined> {
 		const streams = this.quic.incomingUnidirectionalStreams.getReader()
 
 		const { value, done } = await streams.read()
@@ -114,7 +94,7 @@ export class Objects {
 
 		const r = new Reader(new Uint8Array(), value)
 		const type = (await r.u53()) as StreamType
-		let res: TrackReader | GroupReader | ObjectReader
+		let res: TrackReader | SubgroupReader
 
 		if (type == StreamType.Track) {
 			const h: TrackHeader = {
@@ -125,28 +105,18 @@ export class Objects {
 			}
 
 			res = new TrackReader(h, r)
-		} else if (type == StreamType.Group) {
-			const h: GroupHeader = {
-				type,
-				sub: await r.u62(),
-				track: await r.u62(),
-				group: await r.u53(),
-				publisher_priority: await r.u8(),
-			}
-			res = new GroupReader(h, r)
-		} else if (type == StreamType.Object) {
+		} else if (type == StreamType.Subgroup) {
 			const h = {
 				type,
 				sub: await r.u62(),
 				track: await r.u62(),
 				group: await r.u53(),
-				object: await r.u53(),
-				status: await r.u53(),
+				subgroup: await r.u53(),
 				publisher_priority: await r.u8(),
 			}
-
-			res = new ObjectReader(h, r)
+			res = new SubgroupReader(h, r)
 		} else {
+			console.log("transport/objects.ts: unknown stream type: ", type)
 			throw new Error("unknown stream type")
 		}
 
@@ -181,13 +151,13 @@ export class TrackWriter {
 	}
 }
 
-export class GroupWriter {
+export class SubgroupWriter {
 	constructor(
-		public header: GroupHeader,
+		public header: SubgroupHeader,
 		public stream: Writer,
 	) {}
 
-	async write(c: GroupChunk) {
+	async write(c: SubgroupChunk) {
 		await this.stream.u53(c.object)
 		if (c.payload instanceof Uint8Array) {
 			await this.stream.u53(c.payload.byteLength)
@@ -196,21 +166,6 @@ export class GroupWriter {
 			await this.stream.u53(0)
 			await this.stream.u53(c.payload as number)
 		}
-	}
-
-	async close() {
-		await this.stream.close()
-	}
-}
-
-export class ObjectWriter {
-	constructor(
-		public header: ObjectHeader,
-		public stream: Writer,
-	) {}
-
-	async write(c: ObjectChunk) {
-		await this.stream.write(c.payload)
 	}
 
 	async close() {
@@ -252,13 +207,13 @@ export class TrackReader {
 	}
 }
 
-export class GroupReader {
+export class SubgroupReader {
 	constructor(
-		public header: GroupHeader,
+		public header: SubgroupHeader,
 		public stream: Reader,
 	) {}
 
-	async read(): Promise<GroupChunk | undefined> {
+	async read(): Promise<SubgroupChunk | undefined> {
 		if (await this.stream.done()) {
 			return
 		}
@@ -276,28 +231,6 @@ export class GroupReader {
 		return {
 			object,
 			payload,
-		}
-	}
-
-	async close() {
-		await this.stream.close()
-	}
-}
-
-export class ObjectReader {
-	constructor(
-		public header: ObjectHeader,
-		public stream: Reader,
-	) {}
-
-	// NOTE: Can only be called once.
-	async read(): Promise<ObjectChunk | undefined> {
-		if (await this.stream.done()) {
-			return
-		}
-
-		return {
-			payload: await this.stream.readAll(),
 		}
 	}
 

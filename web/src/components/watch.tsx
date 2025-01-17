@@ -1,11 +1,14 @@
 /* eslint-disable jsx-a11y/media-has-caption */
-import { Player } from "@kixelated/moq/playback"
+import Player from "moq-player/simple-player"
+
 import Fail from "./fail"
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
 import { VolumeControl } from "./volume"
 import { PlayButton } from "./play-button"
 import { TrackSelect } from "./track-select"
-import { state, setState } from "src/store/state"
+import { PictureInPictureButton } from "./picture-in-picture"
+import { state } from "src/store/state"
+import { FullscreenButton } from "./fullscreen"
 
 export default function Watch(props: { name: string }) {
 	// Use query params to allow overriding environment variables.
@@ -53,10 +56,9 @@ export default function Watch(props: { name: string }) {
 	createEffect(() => {
 		if (hovered()) {
 			setShowControls(true)
-			return
 		}
 
-		const timeoutId = setTimeout(() => setShowControls(false), 3000)
+		const timeoutId = setTimeout(() => !state.pipActive && setShowControls(false), 3000)
 		onCleanup(() => clearTimeout(timeoutId))
 	})
 
@@ -65,14 +67,20 @@ export default function Watch(props: { name: string }) {
 	return (
 		<>
 			<Fail error={error()} />
-			<div class="relative aspect-video w-full">
+			<div class="relative aspect-video w-full" id="video">
 				<canvas
 					ref={canvas}
 					onClick={state.handlePlayPause}
-					class="h-full w-full rounded-lg"
+					class="h-full w-full rounded-lg object-contain"
+					id="video-canvas"
 					onMouseEnter={() => setHovered(true)}
 					onMouseLeave={() => setHovered(false)}
 				/>
+				{state.pipActive && (
+					<div class="relative flex h-full w-full items-center justify-center bg-black text-white">
+						Picture-in-Picture Mode
+					</div>
+				)}
 				<div
 					class={`mr-px-4 ml-px-4 ${
 						showControls() ? "opacity-100" : "opacity-0"
@@ -82,6 +90,10 @@ export default function Watch(props: { name: string }) {
 					<div class="absolute bottom-0 right-4 flex h-[32px] w-fit items-center justify-evenly gap-[4px] rounded bg-black/70 p-2">
 						<VolumeControl />
 						<TrackSelect trackNum={tracknum} />
+						{"documentPictureInPicture" in window && (
+							<PictureInPictureButton play={state.handlePlayPause} />
+						)}
+						<FullscreenButton />
 					</div>
 				</div>
 			</div>
