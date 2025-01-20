@@ -20,7 +20,7 @@ export interface PlayerConfig {
 }
 
 // This class must be created on the main thread due to AudioContext.
-export class Player {
+export default class Player {
 	#backend: Backend
 
 	// A periodically updated timeline
@@ -129,8 +129,6 @@ export class Player {
 		const kind = Catalog.isVideoTrack(track) ? "video" : Catalog.isAudioTrack(track) ? "audio" : "unknown"
 		if (kind == "audio" && this.#muted) return
 
-		const sub = await this.#connection.subscribe(track.namespace, track.name)
-
 		if (kind == "audio") {
 			// Save ref to last audio track we subscribed to for unmuting
 			this.#audioTrackName = track.name
@@ -139,6 +137,8 @@ export class Player {
 		if (kind == "video") {
 			this.#videoTrackName = track.name
 		}
+
+		const sub = await this.#connection.subscribe(track.namespace, track.name)
 
 		try {
 			for (;;) {
@@ -214,6 +214,14 @@ export class Player {
 
 	isPaused() {
 		return this.#paused
+	}
+
+	get muted(): boolean {
+		return this.#muted
+	}
+
+	get videoTrackName(): string {
+		return this.#videoTrackName
 	}
 
 	async switchTrack(trackname: string) {
@@ -298,6 +306,15 @@ export class Player {
 	}
 	*/
 
+	// Added this to divide play and pause into two different functions
+	async togglePlayPause() {
+		if (this.#paused) {
+			await this.play()
+		} else {
+			await this.pause()
+		}
+	}
+
 	async play() {
 		if (this.#paused) {
 			this.#paused = false
@@ -307,12 +324,16 @@ export class Player {
 				await this.#backend.unmute()
 			}
 			this.#backend.play()
-		} else {
+		}
+	}
+
+	async pause() {
+		if (!this.#paused) {
 			this.#paused = true
-			this.#backend.pause()
 			const mutePromise = this.#backend.mute()
 			const audioPromise = this.unsubscribeFromTrack(this.#audioTrackName)
 			const videoPromise = this.unsubscribeFromTrack(this.#videoTrackName)
+			this.#backend.pause()
 			await Promise.all([mutePromise, audioPromise, videoPromise])
 		}
 	}

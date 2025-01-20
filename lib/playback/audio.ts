@@ -1,10 +1,6 @@
-/// <reference types="vite/client" />
-
 import * as Message from "./worker/message"
 
-// This is a non-standard way of importing worklet/workers.
-// Unfortunately, it's the only option because of a Vite bug: https://github.com/vitejs/vite/issues/11823
-import workletURL from "./worklet/index.ts?worker&url"
+import registerMyAudioWorklet from "audio-worklet:./worklet/index.ts"
 
 // NOTE: This must be on the main thread
 export class Audio {
@@ -25,8 +21,7 @@ export class Audio {
 
 	private async load(config: Message.ConfigAudio): Promise<AudioWorkletNode> {
 		// Load the worklet source code.
-		await this.context.audioWorklet.addModule(workletURL)
-
+		await registerMyAudioWorklet(this.context)
 		const volume = this.context.createGain()
 		volume.gain.value = 2.0
 

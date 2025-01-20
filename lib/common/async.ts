@@ -26,6 +26,7 @@ export class Watch<T> {
 
 	constructor(init: T) {
 		this.#next = new Deferred<WatchNext<T>>()
+		// eslint-disable-next-line @typescript-eslint/no-floating-promises
 		this.#current = [init, this.#next.promise]
 	}
 
@@ -44,6 +45,7 @@ export class Watch<T> {
 		}
 
 		const next = new Deferred<WatchNext<T>>()
+		// eslint-disable-next-line @typescript-eslint/no-floating-promises
 		this.#current = [v, next.promise]
 		this.#next.resolve(this.#current)
 		this.#next = next

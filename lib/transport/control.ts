@@ -327,7 +327,7 @@ export class Decoder {
 			)
 		}
 
-		switch (t) {
+		switch (t as Id) {
 			case Id.Subscribe:
 				return Msg.Subscribe
 			case Id.SubscribeOk:

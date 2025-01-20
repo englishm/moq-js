@@ -28,8 +28,8 @@ MP4.BoxParser.dOpsBox.prototype.write = function (stream: MP4.Stream) {
 	stream.writeUint8(this.ChannelMappingFamily)
 
 	if (this.ChannelMappingFamily !== 0) {
-		stream.writeUint8(this.StreamCount!)
-		stream.writeUint8(this.CoupledCount!)
+		stream.writeUint8(this.StreamCount)
+		stream.writeUint8(this.CoupledCount)
 		for (const mapping of this.ChannelMapping!) {
 			stream.writeUint8(mapping)
 		}
