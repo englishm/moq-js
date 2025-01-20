@@ -10,6 +10,8 @@ export type Subscriber =
 	| AnnounceError
 	| SubscribeNamespace
 	| UnsubscribeNamespace
+	| Fetch
+	| FetchCancel
 
 export function isSubscriber(m: Message): m is Subscriber {
 	return (
@@ -31,6 +33,8 @@ export type Publisher =
 	| SubscribeNamespaceOk
 	| SubscribeNamespaceError
 	| MaxSubscribeId
+	| FetchOk
+	| FetchError
 
 export function isPublisher(m: Message): m is Publisher {
 	return (
@@ -62,6 +66,10 @@ export enum Msg {
 	SubscribeNamespaceError = "subscribe_namespace_error",
 	UnsubscribeNamespace = "unsubscribe_namespace",
 	MaxSubscribeId = "max_subscribe_id",
+	Fetch = "fetch",
+	FetchCancel = "fetch_cancel",
+	FetchOk = "fetch_ok",
+	FetchError = "fetch_error",
 }
 
 enum Id {
@@ -84,6 +92,10 @@ enum Id {
 	SubscribeNamespaceError = 0x13,
 	UnsubscribeNamespace = 0x14,
 	MaxSubscribeId = 0x15,
+	Fetch = 0x16,
+	FetchCancel = 0x17,
+	FetchOk = 0x18,
+	FetchError = 0x19,
 }
 
 export interface Subscribe {
@@ -214,6 +226,42 @@ export interface MaxSubscribeId {
 	id: bigint
 }
 
+export interface Fetch {
+	kind: Msg.Fetch
+	id: bigint
+	namespace: string[]
+	name: string
+	subscriber_priority: number
+	group_order: GroupOrder
+	start_group: number
+	start_object: number
+	end_group: number
+	end_object: number
+	params?: Parameters
+}
+
+export interface FetchOk {
+	kind: Msg.FetchOk
+	id: bigint
+	group_order: number
+	end_of_track: number
+	largest_group_id: bigint
+	largest_object_id: bigint
+	params?: Parameters
+}
+
+export interface FetchError {
+	kind: Msg.FetchError
+	id: bigint
+	code: bigint
+	reason: string
+}
+
+export interface FetchCancel {
+	kind: Msg.FetchCancel
+	id: bigint
+}
+
 export class Stream {
 	private decoder: Decoder
 	private encoder: Encoder
@@ -310,6 +358,14 @@ export class Decoder {
 				return Msg.UnsubscribeNamespace
 			case Id.MaxSubscribeId:
 				return Msg.MaxSubscribeId
+			case Id.Fetch:
+				return Msg.Fetch
+			case Id.FetchCancel:
+				return Msg.FetchCancel
+			case Id.FetchOk:
+				return Msg.FetchOk
+			case Id.FetchError:
+				return Msg.FetchError
 		}
 
 		throw new Error(`unknown control message type: ${t}`)
@@ -348,6 +404,14 @@ export class Decoder {
 				return this.unsubscribe_namespace()
 			case Msg.MaxSubscribeId:
 				return this.max_subscribe_id()
+			case Msg.Fetch:
+				return this.fetch()
+			case Msg.FetchCancel:
+				return this.fetchCancel()
+			case Msg.FetchOk:
+				return this.fetchOk()
+			case Msg.FetchError:
+				return this.fetchError()
 		}
 	}
 
@@ -564,6 +628,50 @@ export class Decoder {
 			id: await this.r.u62(),
 		}
 	}
+
+	private async fetch(): Promise<Fetch> {
+		return {
+			kind: Msg.Fetch,
+			id: await this.r.u62(),
+			namespace: await this.r.tuple(),
+			name: await this.r.string(),
+			subscriber_priority: await this.r.u8(),
+			group_order: await this.decodeGroupOrder(),
+			start_group: await this.r.u53(),
+			start_object: await this.r.u53(),
+			end_group: await this.r.u53(),
+			end_object: await this.r.u53(),
+			params: await this.parameters(),
+		}
+	}
+
+	private async fetchCancel(): Promise<FetchCancel> {
+		return {
+			kind: Msg.FetchCancel,
+			id: await this.r.u62(),
+		}
+	}
+
+	private async fetchOk(): Promise<FetchOk> {
+		return {
+			kind: Msg.FetchOk,
+			id: await this.r.u62(),
+			group_order: await this.r.u8(),
+			end_of_track: await this.r.u8(),
+			largest_group_id: await this.r.u62(),
+			largest_object_id: await this.r.u62(),
+			params: await this.parameters(),
+		}
+	}
+
+	private async fetchError(): Promise<FetchError> {
+		return {
+			kind: Msg.FetchError,
+			id: await this.r.u62(),
+			code: await this.r.u62(),
+			reason: await this.r.string(),
+		}
+	}
 }
 
 export class Encoder {
@@ -603,6 +711,14 @@ export class Encoder {
 				return this.unsubscribe_namespace(m)
 			case Msg.MaxSubscribeId:
 				return this.max_subscribe_id(m)
+			case Msg.Fetch:
+				return this.fetch(m)
+			case Msg.FetchCancel:
+				return this.fetchCancel(m)
+			case Msg.FetchOk:
+				return this.fetchOk(m)
+			case Msg.FetchError:
+				return this.fetchError(m)
 		}
 	}
 
@@ -864,5 +980,79 @@ export class Encoder {
 		}
 
 		return this.w.concatBuffer(paramFields)
+	}
+
+	async fetch(f: Fetch) {
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, f.id),
+			this.w.encodeTuple(buffer, f.namespace),
+			this.w.encodeString(buffer, f.name),
+			this.w.setUint8(buffer, f.subscriber_priority),
+			this.w.setUint8(buffer, f.group_order),
+			this.w.setVint53(buffer, f.start_group),
+			this.w.setVint53(buffer, f.start_object),
+			this.w.setVint53(buffer, f.end_group),
+			this.w.setVint53(buffer, f.end_object),
+			this.encodeParameters(buffer, f.params),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.Fetch)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
+	}
+
+	async fetchCancel(fc: FetchCancel) {
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([this.w.setVint62(buffer, fc.id)])
+
+		const messageType = this.w.setVint53(buffer, Id.FetchCancel)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
+	}
+
+	async fetchOk(fo: FetchOk) {
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, fo.id),
+			this.w.setUint8(buffer, fo.group_order),
+			this.w.setUint8(buffer, fo.end_of_track),
+			this.w.setVint62(buffer, fo.largest_group_id),
+			this.w.setVint62(buffer, fo.largest_object_id),
+			this.encodeParameters(buffer, fo.params),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.FetchOk)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
+	}
+
+	async fetchError(fe: FetchError) {
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, fe.id),
+			this.w.setVint62(buffer, fe.code),
+			this.w.encodeString(buffer, fe.reason),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.FetchError)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
 	}
 }
