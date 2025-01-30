@@ -1,6 +1,6 @@
 {
 	"name": "@moq-js/player",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Media over QUIC library",
 	"license": "(MIT OR Apache-2.0)",
 	"wc-player": "video-moq/index.ts",
@@ -58,18 +58,8 @@
 		"mp4box": "^0.5.2"
 	},
 	"browserslist": {
-		"production": [
-			"chrome >= 97",
-			"edge >= 98",
-			"firefox >= 130",
-			"opera >= 83",
-			"safari >= 18"
-		],
-		"development": [
-			"last 1 chrome version",
-			"last 1 firefox version",
-			"last 1 safari version"
-		]
+		"production": ["chrome >= 97", "edge >= 98", "firefox >= 130", "opera >= 83", "safari >= 18"],
+		"development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
 	},
 	"repository": {
 		"type": "git",
