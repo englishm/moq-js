@@ -56,7 +56,7 @@ export class Client {
 		// TODO verify the SETUP response.
 		const server = await setup.recv.server()
 
-		if (server.version != Setup.Version.DRAFT_06) {
+		if (server.version != Setup.Version.DRAFT_07) {
 			throw new Error(`unsupported server version: ${server.version}`)
 		}
 
