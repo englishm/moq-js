@@ -309,6 +309,7 @@ export class Decoder {
 			case Msg.SubscribeError:
 				return this.subscribe_error()
 			case Msg.SubscribeDone:
+				return this.subscribe_done()
 			case Msg.Unsubscribe:
 				return this.unsubscribe()
 			case Msg.Announce:
