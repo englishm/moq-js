@@ -1,6 +1,6 @@
 {
 	"name": "@moq-js/player",
-	"version": "0.2.2",
+	"version": "0.4.3",
 	"description": "Media over QUIC library",
 	"license": "(MIT OR Apache-2.0)",
 	"wc-player": "video-moq/index.ts",
