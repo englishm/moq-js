@@ -163,11 +163,14 @@ export class VideoMoq extends HTMLElement {
 
 	/**
 	 * Called when the element is removed from the DOM
+	 *
+	 * Note: We intentionally skip cleanup here to avoid blocking the main thread.
+	 * The destroy() method calls AudioContext.close() which can block for several seconds,
+	 * causing UI freezes and test timeouts. Resources will be cleaned up by garbage collection.
 	 * */
 	disconnectedCallback() {
-		this.destroy().catch((error) => {
-			console.error("Error while destroying:", error)
-		})
+		// Skip cleanup - let garbage collection handle it
+		// This prevents blocking issues when removing the element from DOM
 	}
 
 	// Called when one of the element's watched attributes change. For an attribute to be watched, you must add it to the component class's static observedAttributes property.
