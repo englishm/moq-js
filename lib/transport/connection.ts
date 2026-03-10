@@ -95,7 +95,18 @@ export class Connection {
 	}
 
 	async #recv(msg: Control.MessageWithType) {
-		if (Control.isPublisher(msg.type)) {
+		// RequestOk and RequestError can be sent by either side,
+		// so route based on request ID parity (even=subscriber-initiated, odd=publisher-initiated)
+		if (msg.type === Control.ControlMessageType.RequestOk || msg.type === Control.ControlMessageType.RequestError) {
+			const id = (msg.message as { id: bigint }).id
+			if (id % 2n === 0n) {
+				// Even request ID = subscriber-initiated request, response goes to subscriber
+				await this.#subscriber.recv(msg)
+			} else {
+				// Odd request ID = publisher-initiated request, response goes to publisher
+				await this.#publisher.recv(msg)
+			}
+		} else if (Control.isPublisher(msg.type)) {
 			await this.#subscriber.recv(msg)
 		} else {
 			await this.#publisher.recv(msg)

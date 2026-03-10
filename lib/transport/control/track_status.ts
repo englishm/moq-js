@@ -1,42 +1,42 @@
 import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Parameters, Tuple, KeyValuePairs } from "../base_data"
+import { Tuple, Parameters } from "../base_data"
 
 
-export interface PublishNamespace {
+export interface TrackStatus {
 	id: bigint
 	namespace: Tuple<string>
-	params?: Parameters
+	name: string
+	params: Parameters
 }
 
-export namespace PublishNamespace {
-	export function serialize(v: PublishNamespace): Uint8Array {
+export namespace TrackStatus {
+	export function serialize(v: TrackStatus): Uint8Array {
 		const mainBuf = new MutableBytesBuffer(new Uint8Array())
-		mainBuf.putVarInt(ControlMessageType.PublishNamespace)
-
+		mainBuf.putVarInt(ControlMessageType.TrackStatus)
 		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
 		payloadBuf.putVarInt(v.id)
 		payloadBuf.putBytes(Tuple.serialize(v.namespace))
-		// Draft-16: Number of Parameters + delta-encoded parameters
-		const params = v.params ?? new Map()
-		const paramsBytes = KeyValuePairs.serialize(params)
-		payloadBuf.putVarInt(params.size)
+		payloadBuf.putUtf8String(v.name)
+		const paramsBytes = Parameters.serialize(v.params)
+		payloadBuf.putVarInt(v.params.size) // Number of Parameters
 		payloadBuf.putBytes(paramsBytes)
-
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)
 		return mainBuf.Uint8Array
 	}
 
-	export function deserialize(reader: ImmutableBytesBuffer): PublishNamespace {
+	export function deserialize(reader: ImmutableBytesBuffer): TrackStatus {
 		const id = reader.getVarInt()
 		const namespace = Tuple.deserialize(reader)
+		const name = reader.getUtf8String()
 		const numParams = reader.getNumberVarInt()
 		const params = Parameters.deserialize_with_count(reader, numParams)
 		return {
 			id,
 			namespace,
-			params
+			name,
+			params,
 		}
 	}
 }
