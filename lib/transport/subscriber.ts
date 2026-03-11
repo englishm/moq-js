@@ -5,6 +5,7 @@ import type { TrackReader } from "./objects"
 import { debug } from "./utils"
 import { ControlStream } from "./stream"
 import { SubgroupReader } from "./subgroup"
+import { ParameterType } from "./base_data"
 
 export interface TrackInfo {
 	track_alias: bigint
@@ -50,8 +51,8 @@ export class Subscriber {
 			case Control.ControlMessageType.SubscribeOk:
 				this.recvSubscribeOk(message)
 				break
-			case Control.ControlMessageType.SubscribeError:
-				await this.recvSubscribeError(message)
+			case Control.ControlMessageType.RequestError:
+				await this.recvRequestError(message)
 				break
 			case Control.ControlMessageType.PublishDone:
 				await this.recvPublishDone(message)
@@ -67,8 +68,8 @@ export class Subscriber {
 		}
 
 		await this.#control.send({
-			type: Control.ControlMessageType.PublishNamespaceOk,
-			message: { id: msg.id }
+			type: Control.ControlMessageType.RequestOk,
+			message: { id: msg.id, parameters: new Map() }
 		})
 
 		const publishNamespace = new PublishNamespaceRecv(this.#control, msg.namespace, msg.id)
@@ -89,12 +90,17 @@ export class Subscriber {
 			message: {
 				id,
 				namespace,
+				subscribe_options: Control.SubscribeOptions.BOTH,
 			}
 		}
 		await this.#control.send(msg)
 	}
 
-	async subscribe(namespace: string[], track: string) {
+	async subscribe(namespace: string[], track: string, opts?: {
+		forward?: number,
+		subscriber_priority?: number,
+		group_order?: Control.GroupOrder,
+	}) {
 		const id = this.#control.nextRequestId()
 
 		const subscribe = new SubscribeSend(this.#control, id, namespace, track)
@@ -102,17 +108,24 @@ export class Subscriber {
 
 		this.#trackToIDMap.set(track, id)
 
+		const params = new Map<bigint, Uint8Array | bigint>()
+		if (opts?.forward !== undefined) {
+			params.set(BigInt(ParameterType.FORWARD), BigInt(opts.forward))
+		}
+		if (opts?.subscriber_priority !== undefined) {
+			params.set(BigInt(ParameterType.SUBSCRIBER_PRIORITY), BigInt(opts.subscriber_priority))
+		}
+		if (opts?.group_order !== undefined) {
+			params.set(BigInt(ParameterType.GROUP_ORDER), BigInt(opts.group_order))
+		}
+
 		const subscription_req: Control.MessageWithType = {
 			type: Control.ControlMessageType.Subscribe,
 			message: {
 				id,
 				namespace,
 				name: track,
-				subscriber_priority: 127, // default to mid value, see: https://github.com/moq-wg/moq-transport/issues/504
-				group_order: Control.GroupOrder.Publisher,
-				filter_type: Control.FilterType.NextGroupStart,
-				forward: 1, // always forward
-				params: new Map(),
+				params,
 			}
 		}
 
@@ -160,10 +173,10 @@ export class Subscriber {
 		subscribe.onOk(msg.track_alias)
 	}
 
-	async recvSubscribeError(msg: Control.SubscribeError) {
+	async recvRequestError(msg: Control.RequestError) {
 		const subscribe = this.#subscribe.get(msg.id)
 		if (!subscribe) {
-			throw new Error(`subscribe error for unknown id: ${msg.id}`)
+			throw new Error(`request error for unknown id: ${msg.id}`)
 		}
 
 		await subscribe.onError(msg.code, msg.reason)
@@ -226,8 +239,8 @@ export class PublishNamespaceRecv {
 
 		// Send the control message.
 		return this.#control.send({
-			type: Control.ControlMessageType.PublishNamespaceOk,
-			message: { id: this.#id }
+			type: Control.ControlMessageType.RequestOk,
+			message: { id: this.#id, parameters: new Map() }
 		})
 	}
 
@@ -236,8 +249,8 @@ export class PublishNamespaceRecv {
 		this.#state = "closed"
 
 		return this.#control.send({
-			type: Control.ControlMessageType.PublishNamespaceError,
-			message: { id: this.#id, code, reason }
+			type: Control.ControlMessageType.RequestError,
+			message: { id: this.#id, code, retry_interval: 0n, reason }
 		})
 	}
 }
@@ -274,7 +287,7 @@ export class SubscribeSend {
 		this.#trackAlias = trackAlias
 	}
 
-	// FIXME(itzmanish): implement correctly 
+	// FIXME(itzmanish): implement correctly
 	async onDone(code: bigint, streamCount: bigint, reason: string) {
 		throw new Error(`TODO onDone`)
 	}
@@ -288,7 +301,7 @@ export class SubscribeSend {
 			reason = `: ${reason}`
 		}
 
-		const err = new Error(`SUBSCRIBE_ERROR (${code})${reason}`)
+		const err = new Error(`REQUEST_ERROR (${code})${reason}`)
 		return await this.#data.abort(err)
 	}
 

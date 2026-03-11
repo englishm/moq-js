@@ -3,6 +3,7 @@ import { ControlStream } from "./stream"
 import { Queue, Watch } from "../common/async"
 import { Objects, TrackWriter, ObjectDatagramType } from "./objects"
 import { SubgroupType, SubgroupWriter } from "./subgroup"
+import { Parameters, ParameterType } from "./base_data"
 
 export class Publisher {
 	// Used to send control messages
@@ -62,21 +63,21 @@ export class Publisher {
 			case Control.ControlMessageType.Unsubscribe:
 				this.recvUnsubscribe(message)
 				break;
-			case Control.ControlMessageType.PublishNamespaceOk:
-				this.recvPublishNamespaceOk(message)
+			case Control.ControlMessageType.RequestOk:
+				this.recvRequestOk(message)
 				break;
-			case Control.ControlMessageType.PublishNamespaceError:
-				this.recvPublishNamespaceError(message)
+			case Control.ControlMessageType.RequestError:
+				this.recvRequestError(message)
 				break;
 			default:
 				throw new Error(`unknown control message`) // impossible
 		}
 	}
 
-	recvPublishNamespaceOk(msg: Control.PublishNamespaceOk) {
+	recvRequestOk(msg: Control.RequestOk) {
 		const namespace = this.#waitingPublishNamespaceRequests.get(msg.id)
 		if (!namespace) {
-			throw new Error(`publish namespace OK for unknown announce: ${msg.id}`)
+			throw new Error(`request OK for unknown request: ${msg.id}`)
 		}
 		const publishNamespaceSend = this.#publishedNamespaces.get(namespace)
 		if (!publishNamespaceSend) {
@@ -87,15 +88,15 @@ export class Publisher {
 		console.log("published namespace:", namespace)
 	}
 
-	recvPublishNamespaceError(msg: Control.PublishNamespaceError) {
+	recvRequestError(msg: Control.RequestError) {
 		const namespace = this.#waitingPublishNamespaceRequests.get(msg.id)
 		if (!namespace) {
-			throw new Error(`publish namespace error for unknown announce: ${msg.id}`)
+			throw new Error(`request error for unknown request: ${msg.id}`)
 		}
 		const publishNamespaceSend = this.#publishedNamespaces.get(namespace)
 		if (!publishNamespaceSend) {
 			// TODO debug this
-			console.warn(`publish namespace error for unknown announce: ${namespace}`)
+			console.warn(`request error for unknown namespace: ${namespace}`)
 			return
 		}
 
@@ -114,10 +115,11 @@ export class Publisher {
 			await this.#subscribeQueue.push(subscribe)
 		} catch (e: any) {
 			await this.#control.send({
-				type: Control.ControlMessageType.SubscribeError,
+				type: Control.ControlMessageType.RequestError,
 				message: {
 					id: msg.id,
 					code: 0n,
+					retry_interval: 0n,
 					reason: e.message,
 				}
 			})
@@ -187,7 +189,7 @@ export class PublishNamespaceSend {
 	onError(code: bigint, reason: string) {
 		if (this.closed()) return
 
-		const err = new Error(`PUBLISH_NAMESPACE_ERROR (${code})` + reason ? `: ${reason}` : "")
+		const err = new Error(`REQUEST_ERROR (${code})${reason ? `: ${reason}` : ""}`)
 		this.#state.update(err)
 	}
 }
@@ -197,8 +199,7 @@ export class SubscribeRecv {
 	#objects: Objects
 	#id: bigint
 	#trackAlias: bigint // Publisher-specified in draft-14
-	#subscriberPriority: number
-	groupOrder: Control.GroupOrder
+	params: Parameters;
 
 	readonly namespace: string[]
 	readonly track: string
@@ -213,8 +214,7 @@ export class SubscribeRecv {
 		this.#trackAlias = trackAlias
 		this.namespace = msg.namespace
 		this.track = msg.name
-		this.#subscriberPriority = msg.subscriber_priority
-		this.groupOrder = msg.group_order
+		this.params = msg.params
 	}
 
 	// Acknowledge the subscription as valid.
@@ -230,11 +230,8 @@ export class SubscribeRecv {
 			type: Control.ControlMessageType.SubscribeOk,
 			message: {
 				id: this.#id,
-				expires: 0n,
-				group_order: this.groupOrder,
 				track_alias: this.#trackAlias,
-				content_exists: 0,
-				params: new Map(),
+				params: this.params,
 			}
 		})
 	}
@@ -247,8 +244,8 @@ export class SubscribeRecv {
 
 		if (!acked) {
 			return this.#control.send({
-				type: Control.ControlMessageType.SubscribeError,
-				message: { id: this.#id, code, reason }
+				type: Control.ControlMessageType.RequestError,
+				message: { id: this.#id, code, retry_interval: 0n, reason }
 			})
 		}
 		if (unsubscribe) {

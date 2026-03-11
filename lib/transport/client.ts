@@ -40,7 +40,6 @@ export class Client {
 		const buffer = new ReadableWritableStreamBuffer(stream.readable, stream.writable)
 
 		const msg: Control.ClientSetup = {
-			versions: [Control.Version.DRAFT_14],
 			params: new Map(),
 		}
 		const serialized = Control.ClientSetup.serialize(msg)
@@ -49,10 +48,10 @@ export class Client {
 		// Receive the setup message.
 		// TODO verify the SETUP response.
 		const server = await this.readServerSetup(buffer)
-
-		if (server.version != Control.Version.DRAFT_14) {
-			throw new Error(`unsupported server version: ${server.version}`)
-		}
+		//
+		// if (server.version != Control.Version.DRAFT_14) {
+		// 	throw new Error(`unsupported server version: ${server.version}`)
+		// }
 
 		const control = new Stream.ControlStream(buffer)
 		const objects = new Objects(quic)
