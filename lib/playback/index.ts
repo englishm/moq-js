@@ -154,7 +154,7 @@ export default class Player extends EventTarget {
 
 		try {
 			console.log("starting segment data loop")
-			for (; ;) {
+			for (;;) {
 				console.log("waiting for segment data")
 				const segment = await Promise.race([sub.data(), this.#running])
 				if (!segment) continue

@@ -87,7 +87,7 @@ class Worker {
 		segments.releaseLock()
 
 		// Read each chunk, decoding the MP4 frames and adding them to the queue.
-		for (; ;) {
+		for (;;) {
 			const chunk = await reader.read()
 			if (!chunk) {
 				break

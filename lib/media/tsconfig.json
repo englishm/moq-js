@@ -1,12 +1,8 @@
 {
 	"extends": "../tsconfig.json",
-	"include": [
-		"."
-	],
+	"include": ["."],
 	"compilerOptions": {
-		"types": [
-			"mp4box"
-		]
+		"types": ["mp4box"]
 	},
 	"references": [
 		{

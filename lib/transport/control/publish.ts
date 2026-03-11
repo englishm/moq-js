@@ -55,7 +55,7 @@ export namespace Publish {
 			namespace,
 			name,
 			track_extensions,
-			params
+			params,
 		}
 	}
 }

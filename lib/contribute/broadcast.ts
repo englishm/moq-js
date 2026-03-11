@@ -46,7 +46,7 @@ export class Broadcast {
 			const settings = media.getSettings()
 
 			if (media.kind === "audio") {
-				const audioContext = new AudioContext();
+				const audioContext = new AudioContext()
 				audioContext.createMediaStreamSource(new MediaStream([media]))
 				const sampleRate = audioContext.sampleRate
 				Object.assign(settings, {
@@ -121,7 +121,7 @@ export class Broadcast {
 		console.log("[Broadcast] #run loop started")
 		await this.connection.publish_namespace(this.namespace)
 
-		for (; ;) {
+		for (;;) {
 			const subscriber = await this.connection.subscribed()
 			if (!subscriber) break
 
@@ -164,7 +164,7 @@ export class Broadcast {
 		const bytes = Catalog.encode(this.catalog)
 
 		await subscriber.ack()
-		await sleep(500);
+		await sleep(500)
 
 		const stream = await subscriber.subgroup({ group: 0, subgroup: 0 })
 		await stream.write({ object_id: 0, object_payload: bytes })
@@ -176,7 +176,7 @@ export class Broadcast {
 		if (!track) throw new Error(`no track with name ${subscriber.track}`)
 
 		await subscriber.ack()
-		await sleep(500);
+		await sleep(500)
 
 		const init = await track.init()
 
@@ -193,11 +193,11 @@ export class Broadcast {
 		await subscriber.ack()
 
 		// NOTE(itzmanish): hack to make sure subscribe ok reaches before the segement object
-		await sleep(500);
+		await sleep(500)
 
 		const segments = track.segments().getReader()
 
-		for (; ;) {
+		for (;;) {
 			const { value: segment, done } = await segments.read()
 			if (done) break
 
@@ -221,7 +221,7 @@ export class Broadcast {
 
 		// Pipe the segment to the stream.
 		const chunks = segment.chunks().getReader()
-		for (; ;) {
+		for (;;) {
 			const { value, done } = await chunks.read()
 			if (done) break
 

@@ -1,5 +1,5 @@
 import * as Control from "./control"
-import * as Stream from './stream'
+import * as Stream from "./stream"
 import { Objects } from "./objects"
 import { Connection } from "./connection"
 import { ClientSetup, ControlMessageType, ServerSetup } from "./control"
@@ -79,7 +79,8 @@ export class Client {
 
 	async readServerSetup(buffer: ReadableWritableStreamBuffer): Promise<ServerSetup> {
 		const type: ControlMessageType = await buffer.getNumberVarInt()
-		if (type !== ControlMessageType.ServerSetup) throw new Error(`server SETUP type must be ${ControlMessageType.ServerSetup}, got ${type}`)
+		if (type !== ControlMessageType.ServerSetup)
+			throw new Error(`server SETUP type must be ${ControlMessageType.ServerSetup}, got ${type}`)
 
 		const advertisedLength = await buffer.getU16()
 		const bufferLen = buffer.byteLength
@@ -96,7 +97,8 @@ export class Client {
 
 	async readClientSetup(buffer: ReadableWritableStreamBuffer): Promise<ClientSetup> {
 		const type: ControlMessageType = await buffer.getNumberVarInt()
-		if (type !== ControlMessageType.ClientSetup) throw new Error(`client SETUP type must be ${ControlMessageType.ClientSetup}, got ${type}`)
+		if (type !== ControlMessageType.ClientSetup)
+			throw new Error(`client SETUP type must be ${ControlMessageType.ClientSetup}, got ${type}`)
 
 		const advertisedLength = await buffer.getU16()
 		const bufferLen = buffer.byteLength

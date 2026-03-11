@@ -2,7 +2,6 @@ import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { ReasonPhrase } from "../base_data"
 
-
 export interface PublishDone {
 	id: bigint
 	code: bigint
@@ -34,7 +33,7 @@ export namespace PublishDone {
 			id,
 			code,
 			stream_count,
-			reason
+			reason,
 		}
 	}
 }

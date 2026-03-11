@@ -141,7 +141,7 @@ export class Track {
 
 		return new ReadableStream({
 			pull: async (controller) => {
-				for (; ;) {
+				for (;;) {
 					let index = pos - this.#offset
 					if (index < 0) index = 0
 

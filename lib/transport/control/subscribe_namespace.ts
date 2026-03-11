@@ -2,7 +2,6 @@ import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Tuple, Parameters, KeyValuePairs } from "../base_data"
 
-
 export enum SubscribeOptions {
 	PUBLISH = 0x00,
 	NAMESPACE = 0x01,
@@ -10,12 +9,11 @@ export enum SubscribeOptions {
 }
 
 export interface SubscribeNamespace {
-	id: bigint,
+	id: bigint
 	namespace: string[]
 	subscribe_options: SubscribeOptions
 	params?: Parameters
 }
-
 
 export namespace SubscribeNamespace {
 	export function serialize(v: SubscribeNamespace): Uint8Array {
@@ -43,7 +41,7 @@ export namespace SubscribeNamespace {
 			id,
 			namespace,
 			subscribe_options,
-			params
+			params,
 		}
 	}
 }

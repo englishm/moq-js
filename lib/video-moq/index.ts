@@ -378,20 +378,20 @@ export class VideoMoq extends HTMLElement {
 	public play(): Promise<void> {
 		return this.player
 			? this.player.play().then(() => {
-				if (!this.#playButton) return
-				this.#playButton.innerHTML = PAUSE_SVG
-				this.#playButton.ariaLabel = "Pause"
-			})
+					if (!this.#playButton) return
+					this.#playButton.innerHTML = PAUSE_SVG
+					this.#playButton.ariaLabel = "Pause"
+				})
 			: Promise.resolve()
 	}
 
 	public pause(): Promise<void> {
 		return this.player
 			? this.player.pause().then(() => {
-				if (!this.#playButton) return
-				this.#playButton.innerHTML = PLAY_SVG
-				this.#playButton.ariaLabel = "Play"
-			})
+					if (!this.#playButton) return
+					this.#playButton.innerHTML = PLAY_SVG
+					this.#playButton.ariaLabel = "Play"
+				})
 			: Promise.resolve()
 	}
 
@@ -420,23 +420,23 @@ export class VideoMoq extends HTMLElement {
 	public unmute(): Promise<void> {
 		return this.player
 			? this.player.mute(false).then(() => {
-				if (!this.#volumeButton) return
-				this.#volumeButton.ariaLabel = "Mute"
-				this.#volumeButton.innerText = "🔊"
-				this.#volumeRange!.value = this.previousVolume.toString()
-			})
+					if (!this.#volumeButton) return
+					this.#volumeButton.ariaLabel = "Mute"
+					this.#volumeButton.innerText = "🔊"
+					this.#volumeRange!.value = this.previousVolume.toString()
+				})
 			: Promise.resolve()
 	}
 
 	public mute(): Promise<void> {
 		return this.player
 			? this.player.mute(true).then(() => {
-				if (!this.#volumeButton) return
-				this.#volumeButton.ariaLabel = "Unmute"
-				this.#volumeButton.innerText = "🔇"
-				this.previousVolume = parseFloat(this.#volumeRange!.value)
-				this.#volumeRange!.value = "0"
-			})
+					if (!this.#volumeButton) return
+					this.#volumeButton.ariaLabel = "Unmute"
+					this.#volumeButton.innerText = "🔇"
+					this.previousVolume = parseFloat(this.#volumeRange!.value)
+					this.#volumeRange!.value = "0"
+				})
 			: Promise.resolve()
 	}
 

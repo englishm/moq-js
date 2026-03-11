@@ -37,7 +37,6 @@ export interface StandaloneFetch {
 	end_location: Location
 }
 
-
 export namespace StandaloneFetch {
 	export function serialize(v: StandaloneFetch): Uint8Array {
 		const mainBuf = new MutableBytesBuffer(new Uint8Array())
@@ -62,11 +61,10 @@ export namespace StandaloneFetch {
 			namespace,
 			name,
 			start_location,
-			end_location
+			end_location,
 		}
 	}
 }
-
 
 export interface JoiningFetch {
 	id: bigint
@@ -91,11 +89,10 @@ export namespace JoiningFetch {
 		const start = r.getVarInt()
 		return {
 			id,
-			start
+			start,
 		}
 	}
 }
-
 
 export interface Fetch {
 	id: bigint
@@ -147,7 +144,7 @@ export namespace Fetch {
 			fetch_type,
 			standalone,
 			joining,
-			params
+			params,
 		}
 	}
 }

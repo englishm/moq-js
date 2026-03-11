@@ -2,7 +2,6 @@ import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Tuple, Parameters } from "../base_data"
 
-
 export interface TrackStatus {
 	id: bigint
 	namespace: Tuple<string>

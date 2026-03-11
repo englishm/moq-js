@@ -5,9 +5,9 @@ import { ReasonPhrase } from "../base_data"
 // Draft-16: REQUEST_ERROR (Section 9.8)
 // Sent in response to any request (SUBSCRIBE, FETCH, PUBLISH, SUBSCRIBE_NAMESPACE, PUBLISH_NAMESPACE, TRACK_STATUS)
 export interface RequestError {
-	id: bigint       // Request ID
-	code: bigint     // Error Code (RequestErrorCode)
-	retry_interval: bigint  // Minimum retry time in ms + 1; 0 = don't retry
+	id: bigint // Request ID
+	code: bigint // Error Code (RequestErrorCode)
+	retry_interval: bigint // Minimum retry time in ms + 1; 0 = don't retry
 	reason: ReasonPhrase
 }
 

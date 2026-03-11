@@ -2,7 +2,6 @@ import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Tuple } from "../base_data"
 
-
 export interface NamespaceDone {
 	namespace_suffix: string[]
 }

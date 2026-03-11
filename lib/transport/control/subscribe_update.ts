@@ -3,11 +3,10 @@ import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters, Location } from "../base_data"
 
 export interface SubscribeUpdate {
-	id: bigint               // Request ID (new)
-	subscription_id: bigint  // Existing Request ID
+	id: bigint // Request ID (new)
+	subscription_id: bigint // Existing Request ID
 	params?: Parameters
 }
-
 
 export namespace SubscribeUpdate {
 	export function serialize(v: SubscribeUpdate): Uint8Array {

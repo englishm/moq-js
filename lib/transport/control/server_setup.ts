@@ -24,7 +24,7 @@ export namespace ServerSetup {
 		const numParams = reader.getNumberVarInt()
 		const params = Parameters.deserialize_with_count(reader, numParams)
 		return {
-			params
+			params,
 		}
 	}
 }

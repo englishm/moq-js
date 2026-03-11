@@ -23,7 +23,6 @@ import { RequestError } from "./request_error"
 import { MaxRequestId } from "./max_request_id"
 import { RequestsBlocked } from "./requests_blocked"
 
-
 enum Version {
 	DRAFT_00 = 0xff000000,
 	DRAFT_01 = 0xff000001,
@@ -66,13 +65,35 @@ type MessageWithType =
 type Message = Subscriber | Publisher
 
 // Sent by subscriber
-type Subscriber = Subscribe | SubscribeUpdate | SubscribeNamespace |
-	Unsubscribe | PublishOk | Fetch | FetchCancel | PublishNamespaceCancel |
-	TrackStatus | MaxRequestId | RequestsBlocked | RequestOk | RequestError
+type Subscriber =
+	| Subscribe
+	| SubscribeUpdate
+	| SubscribeNamespace
+	| Unsubscribe
+	| PublishOk
+	| Fetch
+	| FetchCancel
+	| PublishNamespaceCancel
+	| TrackStatus
+	| MaxRequestId
+	| RequestsBlocked
+	| RequestOk
+	| RequestError
 
 // Sent by publisher
-type Publisher = SubscribeOk | PublishDone | Publish | PublishNamespace | PublishNamespaceDone
-	| Namespace | NamespaceDone | FetchOk | MaxRequestId | RequestsBlocked | RequestOk | RequestError
+type Publisher =
+	| SubscribeOk
+	| PublishDone
+	| Publish
+	| PublishNamespace
+	| PublishNamespaceDone
+	| Namespace
+	| NamespaceDone
+	| FetchOk
+	| MaxRequestId
+	| RequestsBlocked
+	| RequestOk
+	| RequestError
 
 function isSubscriber(m: ControlMessageType): boolean {
 	return (
@@ -139,41 +160,65 @@ export enum ControlMessageType {
 	ServerSetup = 0x21,
 
 	// Legacy aliases for backward compat during transition
-	SubscribeUpdate = 0x2,   // Same as RequestUpdate in draft-16
+	SubscribeUpdate = 0x2, // Same as RequestUpdate in draft-16
 }
 
 export namespace ControlMessageType {
 	export function toString(t: ControlMessageType): string {
 		switch (t) {
-			case ControlMessageType.ReservedSetupV00: return "ReservedSetupV00"
-			case ControlMessageType.GoAway: return "GoAway"
-			case ControlMessageType.MaxRequestId: return "MaxRequestId"
-			case ControlMessageType.RequestsBlocked: return "RequestsBlocked"
-			case ControlMessageType.RequestUpdate: return "RequestUpdate"
-			case ControlMessageType.Subscribe: return "Subscribe"
-			case ControlMessageType.SubscribeOk: return "SubscribeOk"
-			case ControlMessageType.RequestError: return "RequestError"
-			case ControlMessageType.Unsubscribe: return "Unsubscribe"
-			case ControlMessageType.PublishDone: return "PublishDone"
-			case ControlMessageType.PublishNamespaceCancel: return "PublishNamespaceCancel"
-			case ControlMessageType.TrackStatus: return "TrackStatus"
-			case ControlMessageType.NamespaceDone: return "NamespaceDone"
-			case ControlMessageType.Publish: return "Publish"
-			case ControlMessageType.PublishOk: return "PublishOk"
-			case ControlMessageType.PublishNamespace: return "PublishNamespace"
-			case ControlMessageType.RequestOk: return "RequestOk"
-			case ControlMessageType.Namespace: return "Namespace"
-			case ControlMessageType.PublishNamespaceDone: return "PublishNamespaceDone"
-			case ControlMessageType.SubscribeNamespace: return "SubscribeNamespace"
-			case ControlMessageType.Fetch: return "Fetch"
-			case ControlMessageType.FetchCancel: return "FetchCancel"
-			case ControlMessageType.FetchOk: return "FetchOk"
-			case ControlMessageType.ClientSetup: return "ClientSetup"
-			case ControlMessageType.ServerSetup: return "ServerSetup"
+			case ControlMessageType.ReservedSetupV00:
+				return "ReservedSetupV00"
+			case ControlMessageType.GoAway:
+				return "GoAway"
+			case ControlMessageType.MaxRequestId:
+				return "MaxRequestId"
+			case ControlMessageType.RequestsBlocked:
+				return "RequestsBlocked"
+			case ControlMessageType.RequestUpdate:
+				return "RequestUpdate"
+			case ControlMessageType.Subscribe:
+				return "Subscribe"
+			case ControlMessageType.SubscribeOk:
+				return "SubscribeOk"
+			case ControlMessageType.RequestError:
+				return "RequestError"
+			case ControlMessageType.Unsubscribe:
+				return "Unsubscribe"
+			case ControlMessageType.PublishDone:
+				return "PublishDone"
+			case ControlMessageType.PublishNamespaceCancel:
+				return "PublishNamespaceCancel"
+			case ControlMessageType.TrackStatus:
+				return "TrackStatus"
+			case ControlMessageType.NamespaceDone:
+				return "NamespaceDone"
+			case ControlMessageType.Publish:
+				return "Publish"
+			case ControlMessageType.PublishOk:
+				return "PublishOk"
+			case ControlMessageType.PublishNamespace:
+				return "PublishNamespace"
+			case ControlMessageType.RequestOk:
+				return "RequestOk"
+			case ControlMessageType.Namespace:
+				return "Namespace"
+			case ControlMessageType.PublishNamespaceDone:
+				return "PublishNamespaceDone"
+			case ControlMessageType.SubscribeNamespace:
+				return "SubscribeNamespace"
+			case ControlMessageType.Fetch:
+				return "Fetch"
+			case ControlMessageType.FetchCancel:
+				return "FetchCancel"
+			case ControlMessageType.FetchOk:
+				return "FetchOk"
+			case ControlMessageType.ClientSetup:
+				return "ClientSetup"
+			case ControlMessageType.ServerSetup:
+				return "ServerSetup"
 		}
 	}
 }
-
 
 export {
 	Subscribe,
@@ -201,7 +246,6 @@ export {
 	RequestsBlocked,
 	RequestOk,
 	RequestError,
-
 	Version,
 	isSubscriber,
 	isPublisher,

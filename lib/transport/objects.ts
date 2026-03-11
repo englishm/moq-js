@@ -1,7 +1,14 @@
 import { SubgroupHeader, SubgroupObject, SubgroupReader, SubgroupType, SubgroupWriter } from "./subgroup"
 import { KeyValuePairs } from "./base_data"
 import { debug } from "./utils"
-import { ImmutableBytesBuffer, MutableBytesBuffer, ReadableStreamBuffer, Reader, WritableStreamBuffer, Writer } from "./buffer"
+import {
+	ImmutableBytesBuffer,
+	MutableBytesBuffer,
+	ReadableStreamBuffer,
+	Reader,
+	WritableStreamBuffer,
+	Writer,
+} from "./buffer"
 
 export enum ObjectForwardingPreference {
 	Datagram = "Datagram",
@@ -56,7 +63,6 @@ export function isDatagram(obj: ObjectDatagram | SubgroupHeader): boolean {
 	// Datagram types have bit 4 NOT set; subgroup types have bit 4 SET
 	return (obj.type & 0x10) === 0
 }
-
 
 // Draft-16: Object Datagram types use bitmask structure 0b00X0XXXX
 // Valid ranges: 0x00..0x0F, 0x20..0x2F
@@ -118,7 +124,7 @@ export namespace ObjectDatagramType {
 			throw new Error(`invalid object datagram type: ${v} (bit 4 set - this is a subgroup type)`)
 		}
 		// Must be in ranges 0x00..0x0F or 0x20..0x2F
-		if (v < 0x00 || (v > 0x0F && v < 0x20) || v > 0x2F) {
+		if (v < 0x00 || (v > 0x0f && v < 0x20) || v > 0x2f) {
 			throw new Error(`invalid object datagram type: ${v} (out of range)`)
 		}
 		// STATUS + END_OF_GROUP is invalid
@@ -155,7 +161,7 @@ export interface ObjectDatagram {
 	track_alias: bigint
 	group_id: number
 	object_id?: number
-	publisher_priority?: number  // undefined when DEFAULT_PRIORITY bit is set
+	publisher_priority?: number // undefined when DEFAULT_PRIORITY bit is set
 	extension_headers?: KeyValuePairs
 	status?: Status
 	object_payload?: Uint8Array
@@ -237,7 +243,7 @@ export class Objects {
 	}
 
 	async send(h: ObjectDatagram | SubgroupHeader): Promise<TrackWriter | SubgroupWriter> {
-		const is_datagram = isDatagram(h);
+		const is_datagram = isDatagram(h)
 
 		if (is_datagram) {
 			// Datagram mode
@@ -318,9 +324,7 @@ export class TrackWriter {
 	// For compatibility with reader interface
 	public header = { track_alias: 0n }
 
-	constructor(
-		public stream: Writer,
-	) { }
+	constructor(public stream: Writer) {}
 
 	async write(c: ObjectDatagram) {
 		return this.stream.write(ObjectDatagram.serialize(c))
@@ -331,15 +335,11 @@ export class TrackWriter {
 	}
 }
 
-
 export class TrackReader {
 	// Header with track_alias for routing
 	public header: { track_alias: bigint }
 
-	constructor(
-		stream: Reader,
-		track_alias: bigint = 0n,
-	) {
+	constructor(stream: Reader, track_alias: bigint = 0n) {
 		this.stream = stream
 		this.header = { track_alias }
 	}
@@ -392,4 +392,3 @@ export class TrackReader {
 		await this.stream.close()
 	}
 }
-

@@ -2,8 +2,6 @@ import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters } from "../base_data"
 
-
-
 export interface PublishOk {
 	id: bigint // Request ID
 	params?: Parameters
@@ -32,7 +30,7 @@ export namespace PublishOk {
 		}
 		return {
 			id,
-			params
+			params,
 		}
 	}
 }

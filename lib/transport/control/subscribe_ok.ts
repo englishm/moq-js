@@ -3,7 +3,6 @@ import { GroupOrder } from "./subscribe"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters, KeyValuePairs } from "../base_data"
 
-
 export interface SubscribeOk {
 	id: bigint // Request ID
 	track_alias: bigint

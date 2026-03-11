@@ -68,7 +68,7 @@ export class Connection {
 		// Receive messages until the connection is closed.
 		try {
 			console.log("starting control loop")
-			for (; ;) {
+			for (;;) {
 				const msg = await this.#controlStream.recv()
 				await this.#recv(msg)
 			}
@@ -81,7 +81,7 @@ export class Connection {
 	async #runObjects() {
 		try {
 			console.log("starting object loop")
-			for (; ;) {
+			for (;;) {
 				const obj = await this.#objects.recv()
 				console.log("object loop got obj", obj)
 				if (!obj) break

@@ -61,14 +61,12 @@ export namespace FilterType {
 	}
 }
 
-
 export interface Subscribe {
 	id: bigint // Request ID
-	namespace: Tuple,
+	namespace: Tuple
 	name: string
 	params: Parameters
 }
-
 
 export namespace Subscribe {
 	export function serialize(v: Subscribe): Uint8Array {

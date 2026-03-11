@@ -4,11 +4,7 @@
 		"moduleResolution": "node",
 		"module": "es2022",
 		"target": "es2022",
-		"lib": [
-			"es2022",
-			"dom",
-			"dom.iterable"
-		],
+		"lib": ["es2022", "dom", "dom.iterable"],
 		"outDir": "./dist",
 		"strict": true,
 		"allowJs": false,
@@ -18,7 +14,5 @@
 		"isolatedModules": false,
 		"noEmit": false
 	},
-	"exclude": [
-		"node_modules"
-	]
+	"exclude": ["node_modules"]
 }

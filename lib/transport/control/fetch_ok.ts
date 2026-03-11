@@ -51,7 +51,7 @@ export namespace FetchOk {
 			end_of_track,
 			end_location,
 			track_extensions,
-			params
+			params,
 		}
 	}
 }

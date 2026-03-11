@@ -8,7 +8,7 @@ export namespace Tuple {
 	export function serialize<T extends string>(tuple: Tuple<T>): Uint8Array {
 		const buf = new MutableBytesBuffer(new Uint8Array())
 		buf.putVarInt(tuple.length)
-		tuple.forEach(field => {
+		tuple.forEach((field) => {
 			const serialized = TupleField.serialize(field)
 			buf.putBytes(serialized)
 		})
@@ -64,14 +64,12 @@ export namespace Location {
 	}
 }
 
-
 // Draft-16: Key-Value-Pairs use delta-encoded types (Section 1.4.2)
 // Delta Type is delta from previous type (or 0 if first)
 // Type even => value is varint (no length prefix)
 // Type odd => value is length-prefixed bytes
 export type KeyValuePairs = Map<bigint, Uint8Array | bigint>
 export type Parameters = KeyValuePairs
-
 
 export namespace KeyValuePairs {
 	export function valueIsVarInt(key: bigint): boolean {
@@ -179,7 +177,6 @@ export namespace KeyValuePairs {
 	}
 }
 
-
 export namespace Parameters {
 	export function valueIsVarInt(key: bigint): boolean {
 		return KeyValuePairs.valueIsVarInt(key)
@@ -205,7 +202,6 @@ export namespace Parameters {
 		return KeyValuePairs.deserialize_with_reader_count(reader, count)
 	}
 }
-
 
 // Draft-16: Reason Phrase structure (Section 1.4.3)
 // Max length is 1024 bytes
@@ -244,7 +240,6 @@ export namespace ReasonPhrase {
 	}
 }
 
-
 // Draft-16: Parameter Type constants (Section 13.2, Table 8)
 export enum ParameterType {
 	DELIVERY_TIMEOUT = 0x02,
@@ -258,19 +253,17 @@ export enum ParameterType {
 	NEW_GROUP_REQUEST = 0x32,
 }
 
-
 // Draft-16: Extension Header Type constants (Section 13.3, Table 9)
 export enum ExtensionHeaderType {
 	DELIVERY_TIMEOUT = 0x02,
 	MAX_CACHE_DURATION = 0x04,
-	IMMUTABLE_EXTENSIONS = 0x0B,
-	DEFAULT_PUBLISHER_PRIORITY = 0x0E,
+	IMMUTABLE_EXTENSIONS = 0x0b,
+	DEFAULT_PUBLISHER_PRIORITY = 0x0e,
 	DEFAULT_PUBLISHER_GROUP_ORDER = 0x22,
 	DYNAMIC_GROUPS = 0x30,
-	PRIOR_GROUP_ID_GAP = 0x3C,
-	PRIOR_OBJECT_ID_GAP = 0x3E,
+	PRIOR_GROUP_ID_GAP = 0x3c,
+	PRIOR_OBJECT_ID_GAP = 0x3e,
 }
-
 
 // Draft-16: Session Termination Error Codes (Section 13.4.1, Table 10)
 export enum SessionTerminationError {
@@ -294,9 +287,8 @@ export enum SessionTerminationError {
 	UNKNOWN_AUTH_TOKEN_ALIAS = 0x17,
 	EXPIRED_AUTH_TOKEN = 0x18,
 	INVALID_AUTHORITY = 0x19,
-	MALFORMED_AUTHORITY = 0x1A,
+	MALFORMED_AUTHORITY = 0x1a,
 }
-
 
 // Draft-16: REQUEST_ERROR Codes (Section 13.4.2, Table 11)
 export enum RequestErrorCode {
@@ -315,7 +307,6 @@ export enum RequestErrorCode {
 	INVALID_JOINING_REQUEST_ID = 0x32,
 }
 
-
 // Draft-16: PUBLISH_DONE Codes (Section 13.4.3, Table 12)
 export enum PublishDoneCode {
 	INTERNAL_ERROR = 0x0,
@@ -328,7 +319,6 @@ export enum PublishDoneCode {
 	UPDATE_FAILED = 0x8,
 	MALFORMED_TRACK = 0x12,
 }
-
 
 // Draft-16: Data Stream Reset Error Codes (Section 13.4.4, Table 13)
 export enum DataStreamResetCode {

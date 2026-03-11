@@ -125,7 +125,7 @@ export class Container {
 
 		// Moof and mdat atoms are written in pairs.
 		// TODO remove the moof/mdat from the Box to reclaim memory once everything works
-		for (; ;) {
+		for (;;) {
 			const moof = this.#mp4.moofs.shift()
 			const mdat = this.#mp4.mdats.shift()
 

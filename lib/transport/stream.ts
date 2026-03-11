@@ -1,16 +1,27 @@
-
 import {
 	ControlMessageType,
-	MessageWithType, Publish,
-	PublishDone, PublishNamespace,
-	PublishNamespaceDone, PublishNamespaceCancel,
-	PublishOk, Unsubscribe,
-	Fetch, FetchOk, FetchCancel,
-	Subscribe, SubscribeOk,
-	SubscribeUpdate, SubscribeNamespace,
-	Namespace, NamespaceDone, TrackStatus,
-	MaxRequestId, RequestsBlocked,
-	RequestOk, RequestError,
+	MessageWithType,
+	Publish,
+	PublishDone,
+	PublishNamespace,
+	PublishNamespaceDone,
+	PublishNamespaceCancel,
+	PublishOk,
+	Unsubscribe,
+	Fetch,
+	FetchOk,
+	FetchCancel,
+	Subscribe,
+	SubscribeOk,
+	SubscribeUpdate,
+	SubscribeNamespace,
+	Namespace,
+	NamespaceDone,
+	TrackStatus,
+	MaxRequestId,
+	RequestsBlocked,
+	RequestOk,
+	RequestError,
 } from "./control"
 import { debug } from "./utils"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } from "./buffer"
@@ -227,7 +238,6 @@ export class Decoder {
 		}
 
 		return res
-
 	}
 }
 

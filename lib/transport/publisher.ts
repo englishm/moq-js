@@ -55,20 +55,20 @@ export class Publisher {
 	}
 
 	async recv(msg: Control.MessageWithType) {
-		const { type, message } = msg;
+		const { type, message } = msg
 		switch (type) {
 			case Control.ControlMessageType.Subscribe:
 				await this.recvSubscribe(message)
-				break;
+				break
 			case Control.ControlMessageType.Unsubscribe:
 				this.recvUnsubscribe(message)
-				break;
+				break
 			case Control.ControlMessageType.RequestOk:
 				this.recvRequestOk(message)
-				break;
+				break
 			case Control.ControlMessageType.RequestError:
 				this.recvRequestError(message)
-				break;
+				break
 			default:
 				throw new Error(`unknown control message`) // impossible
 		}
@@ -121,7 +121,7 @@ export class Publisher {
 					code: 0n,
 					retry_interval: 0n,
 					reason: e.message,
-				}
+				},
 			})
 			throw e
 		}
@@ -151,7 +151,7 @@ export class PublishNamespaceSend {
 	}
 
 	async ok() {
-		for (; ;) {
+		for (;;) {
 			const [state, next] = this.#state.value()
 			if (state === "ack") return
 			if (state instanceof Error) throw state
@@ -162,7 +162,7 @@ export class PublishNamespaceSend {
 	}
 
 	async active() {
-		for (; ;) {
+		for (;;) {
 			const [state, next] = this.#state.value()
 			if (state instanceof Error) throw state
 			if (!next) return
@@ -199,7 +199,7 @@ export class SubscribeRecv {
 	#objects: Objects
 	#id: bigint
 	#trackAlias: bigint // Publisher-specified in draft-14
-	params: Parameters;
+	params: Parameters
 
 	readonly namespace: string[]
 	readonly track: string
@@ -232,12 +232,20 @@ export class SubscribeRecv {
 				id: this.#id,
 				track_alias: this.#trackAlias,
 				params: this.params,
-			}
+			},
 		})
 	}
 
 	// Close the subscription with an error.
-	async close({ code = 0n, reason = "", unsubscribe = true }: { code?: bigint; reason?: string; unsubscribe?: boolean }) {
+	async close({
+		code = 0n,
+		reason = "",
+		unsubscribe = true,
+	}: {
+		code?: bigint
+		reason?: string
+		unsubscribe?: boolean
+	}) {
 		if (this.#state === "closed") return
 		const acked = this.#state === "ack"
 		this.#state = "closed"
@@ -245,13 +253,13 @@ export class SubscribeRecv {
 		if (!acked) {
 			return this.#control.send({
 				type: Control.ControlMessageType.RequestError,
-				message: { id: this.#id, code, retry_interval: 0n, reason }
+				message: { id: this.#id, code, retry_interval: 0n, reason },
 			})
 		}
 		if (unsubscribe) {
 			return this.#control.send({
 				type: Control.ControlMessageType.Unsubscribe,
-				message: { id: this.#id }
+				message: { id: this.#id },
 			})
 		}
 	}

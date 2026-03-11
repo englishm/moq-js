@@ -2,7 +2,6 @@ import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { ReasonPhrase } from "../base_data"
 
-
 export interface PublishNamespaceCancel {
 	id: bigint
 	error_code: bigint
@@ -29,7 +28,7 @@ export namespace PublishNamespaceCancel {
 		return {
 			id,
 			error_code,
-			error_reason
+			error_reason,
 		}
 	}
 }

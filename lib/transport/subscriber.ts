@@ -40,7 +40,7 @@ export class Subscriber {
 	}
 
 	async recv(msg: Control.MessageWithType) {
-		const { type, message } = msg;
+		const { type, message } = msg
 		switch (type) {
 			case Control.ControlMessageType.PublishNamespace:
 				await this.recvPublishNamespace(message)
@@ -69,7 +69,7 @@ export class Subscriber {
 
 		await this.#control.send({
 			type: Control.ControlMessageType.RequestOk,
-			message: { id: msg.id, parameters: new Map() }
+			message: { id: msg.id, parameters: new Map() },
 		})
 
 		const publishNamespace = new PublishNamespaceRecv(this.#control, msg.namespace, msg.id)
@@ -91,16 +91,20 @@ export class Subscriber {
 				id,
 				namespace,
 				subscribe_options: Control.SubscribeOptions.BOTH,
-			}
+			},
 		}
 		await this.#control.send(msg)
 	}
 
-	async subscribe(namespace: string[], track: string, opts?: {
-		forward?: number,
-		subscriber_priority?: number,
-		group_order?: Control.GroupOrder,
-	}) {
+	async subscribe(
+		namespace: string[],
+		track: string,
+		opts?: {
+			forward?: number
+			subscriber_priority?: number
+			group_order?: Control.GroupOrder
+		},
+	) {
 		const id = this.#control.nextRequestId()
 
 		const subscribe = new SubscribeSend(this.#control, id, namespace, track)
@@ -126,7 +130,7 @@ export class Subscriber {
 				namespace,
 				name: track,
 				params,
-			}
+			},
 		}
 
 		await this.#control.send(subscription_req)
@@ -240,7 +244,7 @@ export class PublishNamespaceRecv {
 		// Send the control message.
 		return this.#control.send({
 			type: Control.ControlMessageType.RequestOk,
-			message: { id: this.#id, parameters: new Map() }
+			message: { id: this.#id, parameters: new Map() },
 		})
 	}
 
@@ -250,7 +254,7 @@ export class PublishNamespaceRecv {
 
 		return this.#control.send({
 			type: Control.ControlMessageType.RequestError,
-			message: { id: this.#id, code, retry_interval: 0n, reason }
+			message: { id: this.#id, code, retry_interval: 0n, reason },
 		})
 	}
 }

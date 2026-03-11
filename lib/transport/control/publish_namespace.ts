@@ -2,7 +2,6 @@ import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters, Tuple, KeyValuePairs } from "../base_data"
 
-
 export interface PublishNamespace {
 	id: bigint
 	namespace: Tuple<string>
@@ -36,7 +35,7 @@ export namespace PublishNamespace {
 		return {
 			id,
 			namespace,
-			params
+			params,
 		}
 	}
 }
