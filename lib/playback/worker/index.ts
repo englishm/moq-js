@@ -77,6 +77,9 @@ class Worker {
 		// Create a queue that will contain each MP4 frame.
 		const queue = new TransformStream<MP4.Frame>({})
 		const segment = queue.writable.getWriter()
+		let objectCount = 0
+		let frameCount = 0
+		let firstVideoFrameLogged = false
 
 		// Add the segment to the timeline
 		const segments = timeline.segments.getWriter()
@@ -93,13 +96,58 @@ class Worker {
 				break
 			}
 
+			objectCount += 1
+
 			if (!(chunk.object_payload instanceof Uint8Array)) {
 				throw new Error(`invalid payload: ${chunk.object_payload}`)
 			}
 
 			const frames = container.decode(chunk.object_payload)
+			frameCount += frames.length
+
+			if (msg.kind === "video" && !firstVideoFrameLogged && frames.length > 0) {
+				const first = frames[0]
+				console.log("[PlaybackWorker] video segment first frame", {
+					groupId: msg.header.group_id,
+					subgroupId: msg.header.subgroup_id,
+					objectId: chunk.object_id,
+					codec: first.track.codec,
+					isSync: first.sample.is_sync,
+					cts: first.sample.cts,
+					dts: first.sample.dts,
+					duration: first.sample.duration,
+					framesFromObject: frames.length,
+				})
+
+				if (!first.sample.is_sync) {
+					console.warn("[PlaybackWorker] video segment starts without a keyframe", {
+						groupId: msg.header.group_id,
+						subgroupId: msg.header.subgroup_id,
+						objectId: chunk.object_id,
+					})
+				}
+
+				firstVideoFrameLogged = true
+			}
+
 			for (const frame of frames) {
 				await segment.write(frame)
+			}
+		}
+
+		if (msg.kind === "video") {
+			const details = {
+				groupId: msg.header.group_id,
+				subgroupId: msg.header.subgroup_id,
+				objectCount,
+				frameCount,
+				firstFrameLogged: firstVideoFrameLogged,
+			}
+
+			if (!firstVideoFrameLogged) {
+				console.warn("[PlaybackWorker] video segment produced no frames", details)
+			} else {
+				console.log("[PlaybackWorker] video segment complete", details)
 			}
 		}
 

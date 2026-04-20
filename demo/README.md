@@ -14,9 +14,8 @@ This demo consists of two main pages:
 
 1. **Setup and serve the demo**:
    ```bash
-   # From the root moq-demo-site directory
-   npm run setup          # Copy MoQ library files to demo/lib/
-   npm run dev           # Start local server with required headers
+   # From the root moq-js directory
+   npm run dev           # Watch lib/, rebuild @moq-js/player, and serve the demo
    ```
 
 2. **Open the publisher**:
@@ -158,7 +157,7 @@ demo/
 ### Development Issues
 - Make sure the local server is running (`npm run dev`)
 - Check browser console for WebTransport errors
-- Verify the MoQ library files are loading from `lib/` directory
+- Verify the demo is loading the current player bundle from `lib/dist` via the local dev server
 - Ensure all required headers are present (our server includes them automatically)
 - If using Python server (`npm run serve:python`), note that required headers are missing
 
@@ -172,9 +171,8 @@ demo/
 
 1. **Start Local Development**:
    ```bash
-   # From the root moq-demo-site directory
-   npm run setup         # Copy MoQ library files (one-time setup)
-   npm run dev          # Start local server with headers
+   # From the root moq-js directory
+   npm run dev          # Start local server with headers and watch the player bundle
    ```
 
 2. **Test Locally**:
@@ -187,8 +185,12 @@ demo/
    - Test configuration
 
 4. **Deploy**:
+   - Run `npm run build` from the repo root so the current IIFE bundles from
+     `lib/dist` are copied into `demo/lib`
    - Upload `demo/` folder contents to Cloudflare Pages
-   - The MoQ library files are copied locally and included
+   - For local development, the demo server serves the current `lib/dist` bundles directly
+   - For production deploys, the published `demo/` folder contains synced copies
+     of the current player bundles in `demo/lib`
    - Run `npm run deploy:restore` to switch back to dev config
 
 ## Future Enhancements
