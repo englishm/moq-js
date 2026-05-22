@@ -3,16 +3,16 @@
 
 // Development configuration (localhost)
 const LOCALHOST_CONFIG = {
-  relay: "https://localhost:4443",
-  fingerprint: "https://localhost:4443/fingerprint",
-  environment: "development"
+	relay: "https://localhost:4443",
+	fingerprint: "https://localhost:4443/fingerprint",
+	environment: "development"
 };
 
 // Production configuration (Cloudflare)
 const CLOUDFLARE_CONFIG = {
-  relay: "https://interop-relay.cloudflare.mediaoverquic.com",
-  fingerprint: null, // No fingerprint needed for trusted certificate
-  environment: "production"
+	relay: "https://draft-16-manish.cloudflare.mediaoverquic.com",
+	fingerprint: null, // No fingerprint needed for trusted certificate
+	environment: "production"
 };
 
 // Current active configuration
@@ -31,14 +31,14 @@ const isProduction = () => CONFIG.environment === "production";
 
 // Export configuration and helpers
 window.MoQConfig = {
-  CONFIG,
-  LOCALHOST_CONFIG,
-  CLOUDFLARE_CONFIG,
-  getRelayUrl,
-  getFingerprintUrl,
-  getEnvironment,
-  isLocalhost,
-  isProduction
+	CONFIG,
+	LOCALHOST_CONFIG,
+	CLOUDFLARE_CONFIG,
+	getRelayUrl,
+	getFingerprintUrl,
+	getEnvironment,
+	isLocalhost,
+	isProduction
 };
 
 // Log current configuration
