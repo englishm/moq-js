@@ -1,4 +1,4 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Location, Tuple, Parameters } from "../base_data"
 
@@ -39,17 +39,12 @@ export interface StandaloneFetch {
 
 export namespace StandaloneFetch {
 	export function serialize(v: StandaloneFetch): Uint8Array {
-		const mainBuf = new MutableBytesBuffer(new Uint8Array())
-		mainBuf.putVarInt(ControlMessageType.Fetch)
-		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
-		payloadBuf.putBytes(Tuple.serialize(v.namespace))
-		payloadBuf.putUtf8String(v.name)
-		payloadBuf.putBytes(Location.serialize(v.start_location))
-		payloadBuf.putBytes(Location.serialize(v.end_location))
-
-		mainBuf.putU16(payloadBuf.byteLength)
-		mainBuf.putBytes(payloadBuf.Uint8Array)
-		return mainBuf.Uint8Array
+		const buf = new MutableBytesBuffer(new Uint8Array())
+		buf.putBytes(Tuple.serialize(v.namespace))
+		buf.putUtf8String(v.name)
+		buf.putBytes(Location.serialize(v.start_location))
+		buf.putBytes(Location.serialize(v.end_location))
+		return buf.Uint8Array
 	}
 
 	export function deserialize(r: ImmutableBytesBuffer): StandaloneFetch {
@@ -73,15 +68,10 @@ export interface JoiningFetch {
 
 export namespace JoiningFetch {
 	export function serialize(v: JoiningFetch): Uint8Array {
-		const mainBuf = new MutableBytesBuffer(new Uint8Array())
-		mainBuf.putVarInt(ControlMessageType.Fetch)
-		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
-		payloadBuf.putVarInt(v.id)
-		payloadBuf.putVarInt(v.start)
-
-		mainBuf.putU16(payloadBuf.byteLength)
-		mainBuf.putBytes(payloadBuf.Uint8Array)
-		return mainBuf.Uint8Array
+		const buf = new MutableBytesBuffer(new Uint8Array())
+		buf.putVarInt(v.id)
+		buf.putVarInt(v.start)
+		return buf.Uint8Array
 	}
 
 	export function deserialize(r: ImmutableBytesBuffer): JoiningFetch {
@@ -116,7 +106,6 @@ export namespace Fetch {
 			payloadBuf.putBytes(JoiningFetch.serialize(v.joining))
 		}
 		const params = v.params ?? new Map()
-		payloadBuf.putVarInt(BigInt(params.size))
 		payloadBuf.putBytes(Parameters.serialize(params))
 
 		mainBuf.putU16(payloadBuf.byteLength)

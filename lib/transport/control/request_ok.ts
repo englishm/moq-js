@@ -1,4 +1,4 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters } from "../base_data"
 
@@ -15,9 +15,7 @@ export namespace RequestOk {
 		mainBuf.putVarInt(ControlMessageType.RequestOk)
 		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
 		payloadBuf.putVarInt(v.id)
-		const paramsBytes = Parameters.serialize(v.parameters)
-		payloadBuf.putVarInt(v.parameters.size) // Number of Parameters
-		payloadBuf.putBytes(paramsBytes)
+		payloadBuf.putBytes(Parameters.serialize(v.parameters))
 
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)

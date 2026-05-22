@@ -30,6 +30,7 @@
 	"scripts": {
 		"build": "rollup -c",
 		"dev": "rollup -c -w",
+		"test:transport": "node test/transport.cjs",
 		"lint": "eslint . --ext .js,.ts,.jsx,.tsx",
 		"fmt": "prettier --write ."
 	},

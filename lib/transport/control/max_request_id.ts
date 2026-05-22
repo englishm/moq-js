@@ -1,4 +1,4 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 
 // Draft-16: MAX_REQUEST_ID (Section 9.5, type 0x15)

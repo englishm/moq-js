@@ -1,6 +1,6 @@
 import { ImmutableBytesBuffer, MutableBytesBuffer, Reader, Writer } from "./buffer"
-import { KeyValuePairs } from "./base_data"
-import { Status } from "./objects"
+import { ExtensionHeaders, KeyValuePairs } from "./base_data"
+import { Status } from "./object_status"
 
 export interface SubgroupHeader {
 	type: SubgroupType
@@ -34,20 +34,29 @@ export interface SubgroupObject {
 }
 
 export namespace SubgroupObject {
-	export function serialize(obj: SubgroupObject): Uint8Array {
+	export function serialize(
+		obj: SubgroupObject,
+		object_id_delta = obj.object_id,
+		extensionsPresent = !!obj.extension_headers,
+	): Uint8Array {
 		const buf = new MutableBytesBuffer(new Uint8Array())
-		buf.putVarInt(obj.object_id)
+		buf.putVarInt(object_id_delta)
 
-		if (obj.extension_headers) {
-			const extHeadersBytes = KeyValuePairs.serialize(obj.extension_headers)
-			buf.putVarInt(extHeadersBytes.length)
-			buf.putBytes(extHeadersBytes)
+		if (extensionsPresent) {
+			buf.putBytes(ExtensionHeaders.serialize(obj.extension_headers ?? new Map()))
 		}
-		buf.putVarInt(obj.object_payload?.length ?? 0)
-		if (!obj.object_payload) {
-			buf.putVarInt(obj.status!)
+
+		const payload = obj.object_payload
+		const payloadLength = payload?.length ?? 0
+		if (payloadLength > 0 && obj.status !== undefined && obj.status !== Status.NORMAL) {
+			throw new Error("non-normal object status requires an empty payload")
+		}
+
+		buf.putVarInt(payloadLength)
+		if (payloadLength === 0) {
+			buf.putVarInt(obj.status ?? Status.NORMAL)
 		} else {
-			buf.putBytes(obj.object_payload)
+			buf.putBytes(payload!)
 		}
 		return buf.Uint8Array
 	}
@@ -155,13 +164,28 @@ export namespace SubgroupType {
 }
 
 export class SubgroupWriter {
+	#lastObjectId?: number
+
 	constructor(
 		public header: SubgroupHeader,
 		public stream: Writer,
 	) {}
 
 	async write(c: SubgroupObject) {
-		return this.stream.write(SubgroupObject.serialize(c))
+		const object_id_delta = this.#lastObjectId === undefined ? c.object_id : c.object_id - this.#lastObjectId - 1
+		if (object_id_delta < 0) {
+			throw new Error("object IDs must be monotonically increasing")
+		}
+		const extensionsPresent = SubgroupType.isExtensionPresent(this.header.type)
+		if (!extensionsPresent && c.extension_headers && c.extension_headers.size > 0) {
+			throw new Error("subgroup type does not include object extensions")
+		}
+		if (c.status !== undefined && c.status !== Status.NORMAL && c.extension_headers && c.extension_headers.size > 0) {
+			throw new Error("non-normal object status cannot include extensions")
+		}
+
+		await this.stream.write(SubgroupObject.serialize(c, object_id_delta, extensionsPresent))
+		this.#lastObjectId = c.object_id
 	}
 
 	async close() {
@@ -169,6 +193,8 @@ export class SubgroupWriter {
 	}
 }
 export class SubgroupReader {
+	#lastObjectId?: number
+
 	constructor(
 		public header: SubgroupHeader,
 		public stream: Reader,
@@ -179,7 +205,14 @@ export class SubgroupReader {
 			return
 		}
 
-		const object_id = await this.stream.getNumberVarInt()
+		const object_id_delta = await this.stream.getNumberVarInt()
+		const lastObjectId = this.#lastObjectId
+		const firstObject = lastObjectId === undefined
+		const object_id = firstObject ? object_id_delta : lastObjectId + object_id_delta + 1
+		this.#lastObjectId = object_id
+		if (firstObject && SubgroupType.isSubgroupFirstObjectId(this.header.type)) {
+			this.header.subgroup_id = object_id
+		}
 
 		let extHeaders: KeyValuePairs | undefined
 		if (SubgroupType.isExtensionPresent(this.header.type)) {
@@ -188,22 +221,20 @@ export class SubgroupReader {
 			extHeaders = KeyValuePairs.deserialize(new ImmutableBytesBuffer(extHeadersData))
 		}
 
-		console.log("subgroup header", object_id, extHeaders, this.stream)
-
 		let obj_payload_len = await this.stream.getNumberVarInt()
 
 		let object_payload: Uint8Array | undefined
 		let status: Status | undefined
 
-		console.log("subgroup read", object_id, obj_payload_len)
-
 		if (obj_payload_len == 0) {
 			status = Status.try_from(await this.stream.getNumberVarInt())
+			if (status !== Status.NORMAL && extHeaders && extHeaders.size > 0) {
+				throw new Error("non-normal object status cannot include extensions")
+			}
 		} else {
 			object_payload = await this.stream.read(obj_payload_len)
 		}
 
-		console.log("read success??", object_id, status, extHeaders, object_payload)
 		return {
 			object_id,
 			status,

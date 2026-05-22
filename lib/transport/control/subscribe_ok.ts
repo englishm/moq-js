@@ -1,5 +1,4 @@
-import { ControlMessageType } from "."
-import { GroupOrder } from "./subscribe"
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters, KeyValuePairs } from "../base_data"
 
@@ -16,16 +15,9 @@ export namespace SubscribeOk {
 		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
 		payloadBuf.putVarInt(v.id)
 		payloadBuf.putVarInt(v.track_alias)
-		const paramsBytes = Parameters.serialize(v.params)
-		payloadBuf.putVarInt(v.params.size) // Number of Parameters
-		payloadBuf.putBytes(paramsBytes)
-		// Draft-16: Track Extensions (length-prefixed KVP block)
+		payloadBuf.putBytes(Parameters.serialize(v.params))
 		if (v.track_extensions && v.track_extensions.size > 0) {
-			const extBytes = KeyValuePairs.serialize(v.track_extensions)
-			payloadBuf.putVarInt(extBytes.length)
-			payloadBuf.putBytes(extBytes)
-		} else {
-			payloadBuf.putVarInt(0) // empty track extensions
+			payloadBuf.putBytes(KeyValuePairs.serialize(v.track_extensions))
 		}
 
 		mainBuf.putU16(payloadBuf.byteLength)
@@ -36,16 +28,10 @@ export namespace SubscribeOk {
 	export function deserialize(reader: ImmutableBytesBuffer): SubscribeOk {
 		const id = reader.getVarInt()
 		const track_alias = reader.getVarInt()
-		const numParams = reader.getNumberVarInt()
-		const params = Parameters.deserialize_with_count(reader, numParams)
-		// Draft-16: Track Extensions
+		const params = Parameters.deserialize(reader)
 		let track_extensions: KeyValuePairs | undefined
 		if (reader.remaining > 0) {
-			const extLength = reader.getNumberVarInt()
-			if (extLength > 0) {
-				const extData = reader.getBytes(extLength)
-				track_extensions = KeyValuePairs.deserialize(new ImmutableBytesBuffer(extData))
-			}
+			track_extensions = KeyValuePairs.deserialize(reader)
 		}
 		return {
 			id,

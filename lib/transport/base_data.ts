@@ -177,17 +177,48 @@ export namespace KeyValuePairs {
 	}
 }
 
+export type ExtensionHeaders = KeyValuePairs
+
+export namespace ExtensionHeaders {
+	export function serialize(headers: ExtensionHeaders, allowEmpty = true): Uint8Array {
+		const bytes = KeyValuePairs.serialize(headers)
+		if (!allowEmpty && bytes.length === 0) {
+			throw new Error("extension headers cannot be empty")
+		}
+
+		const buf = new MutableBytesBuffer(new Uint8Array())
+		buf.putVarInt(bytes.length)
+		buf.putBytes(bytes)
+		return buf.Uint8Array
+	}
+
+	export function deserialize(buffer: ImmutableBytesBuffer, allowEmpty = true): ExtensionHeaders {
+		const length = buffer.getNumberVarInt()
+		if (!allowEmpty && length === 0) {
+			throw new Error("extension headers cannot be empty")
+		}
+
+		const bytes = buffer.getBytes(length)
+		return KeyValuePairs.deserialize(new ImmutableBytesBuffer(bytes))
+	}
+}
+
 export namespace Parameters {
 	export function valueIsVarInt(key: bigint): boolean {
 		return KeyValuePairs.valueIsVarInt(key)
 	}
 
 	export function serialize(pairs: Parameters): Uint8Array {
-		return KeyValuePairs.serialize(pairs)
+		const bytes = KeyValuePairs.serialize(pairs)
+		const buf = new MutableBytesBuffer(new Uint8Array())
+		buf.putVarInt(pairs.size)
+		buf.putBytes(bytes)
+		return buf.Uint8Array
 	}
 
 	export function deserialize(buffer: ImmutableBytesBuffer): Parameters {
-		return KeyValuePairs.deserialize(buffer)
+		const count = buffer.getNumberVarInt()
+		return KeyValuePairs.deserialize_with_count(buffer, count)
 	}
 
 	export function deserialize_with_count(buffer: ImmutableBytesBuffer, count: number): Parameters {
@@ -195,7 +226,8 @@ export namespace Parameters {
 	}
 
 	export async function deserialize_with_reader(reader: Reader): Promise<Parameters> {
-		return KeyValuePairs.deserialize_with_reader(reader)
+		const count = await reader.getNumberVarInt()
+		return KeyValuePairs.deserialize_with_reader_count(reader, count)
 	}
 
 	export async function deserialize_with_reader_count(reader: Reader, count: number): Promise<Parameters> {

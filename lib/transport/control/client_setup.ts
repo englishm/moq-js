@@ -1,4 +1,4 @@
-import { ControlMessageType, Version } from "."
+import { ControlMessageType } from "./message_type"
 import { Parameters } from "../base_data"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 
@@ -12,9 +12,7 @@ export namespace ClientSetup {
 		mainBuf.putVarInt(ControlMessageType.ClientSetup)
 		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
 		// Draft-16: Number of Parameters + delta-encoded parameters only
-		const paramsBytes = Parameters.serialize(v.params)
-		payloadBuf.putVarInt(v.params.size)
-		payloadBuf.putBytes(paramsBytes)
+		payloadBuf.putBytes(Parameters.serialize(v.params))
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)
 		return mainBuf.Uint8Array

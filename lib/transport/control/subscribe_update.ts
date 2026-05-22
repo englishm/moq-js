@@ -1,4 +1,4 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters, Location } from "../base_data"
 
@@ -17,9 +17,7 @@ export namespace SubscribeUpdate {
 		payloadBuf.putVarInt(v.id)
 		payloadBuf.putVarInt(v.subscription_id) // Existing Request ID
 		const params = v.params ?? new Map()
-		const paramsBytes = Parameters.serialize(params)
-		payloadBuf.putVarInt(params.size) // Number of Parameters
-		payloadBuf.putBytes(paramsBytes)
+		payloadBuf.putBytes(Parameters.serialize(params))
 
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)

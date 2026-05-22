@@ -3,13 +3,25 @@ import * as Stream from "./stream"
 import { Objects } from "./objects"
 import { Connection } from "./connection"
 import { ClientSetup, ControlMessageType, ServerSetup } from "./control"
+import { SetupParameters } from "./control/setup_parameters"
+import { Parameters } from "./base_data"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer } from "./buffer"
+import { RequestId, maxRequestIdFromParams } from "./request_id"
+
+export const DEFAULT_MAX_REQUEST_ID = 64n
+export const MOQ_TRANSPORT_PROTOCOL = "moqt-16"
+
+interface WebTransportOptionsWithProtocols extends WebTransportOptions {
+	protocols?: string[]
+}
 
 export interface ClientConfig {
 	url: string
 	// If set, the server fingerprint will be fetched from this URL.
 	// This is required to use self-signed certificates with Chrome (May 2023)
 	fingerprint?: string
+	maxRequestId?: number | bigint
+	webTransportProtocols?: string[]
 }
 
 export class Client {
@@ -27,10 +39,8 @@ export class Client {
 	}
 
 	async connect(): Promise<Connection> {
-		const options: WebTransportOptions = {}
-
 		const fingerprint = await this.#fingerprint
-		if (fingerprint) options.serverCertificateHashes = [fingerprint]
+		const options = webTransportOptions(fingerprint, this.config.webTransportProtocols)
 
 		const quic = new WebTransport(this.config.url, options)
 		await quic.ready
@@ -39,9 +49,8 @@ export class Client {
 
 		const buffer = new ReadableWritableStreamBuffer(stream.readable, stream.writable)
 
-		const msg: Control.ClientSetup = {
-			params: new Map(),
-		}
+		const setupParams = clientSetupParams(this.config)
+		const msg: Control.ClientSetup = { params: setupParams }
 		const serialized = Control.ClientSetup.serialize(msg)
 		await buffer.write(serialized)
 
@@ -53,7 +62,10 @@ export class Client {
 		// 	throw new Error(`unsupported server version: ${server.version}`)
 		// }
 
-		const control = new Stream.ControlStream(buffer)
+		const control = new Stream.ControlStream(
+			buffer,
+			RequestId.client(maxRequestIdFromParams(server.params), maxRequestIdFromParams(setupParams)),
+		)
 		const objects = new Objects(quic)
 
 		return new Connection(quic, control, objects)
@@ -110,4 +122,18 @@ export class Client {
 		const bufReader = new ImmutableBytesBuffer(payload)
 		return ClientSetup.deserialize(bufReader)
 	}
+}
+
+export function clientSetupParams(config: Pick<ClientConfig, "maxRequestId"> = {}): Parameters {
+	return new Map([[BigInt(SetupParameters.MaxRequestId), BigInt(config.maxRequestId ?? DEFAULT_MAX_REQUEST_ID)]])
+}
+
+export function webTransportOptions(
+	fingerprint?: WebTransportHash,
+	protocols: string[] = [MOQ_TRANSPORT_PROTOCOL],
+): WebTransportOptions {
+	const options: WebTransportOptionsWithProtocols = {}
+	if (protocols.length > 0) options.protocols = protocols
+	if (fingerprint) options.serverCertificateHashes = [fingerprint]
+	return options
 }

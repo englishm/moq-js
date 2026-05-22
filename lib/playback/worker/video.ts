@@ -158,10 +158,14 @@ export class Renderer {
 				this.#hasSentWaitingForKeyFrameEvent = false
 			}
 
+			const timestamp = toMicroseconds(frame.sample.cts, frame.track.timescale)
+			const duration = toMicroseconds(frame.sample.duration, frame.track.timescale)
+
 			const chunk = new EncodedVideoChunk({
 				type: frame.sample.is_sync ? "key" : "delta",
 				data: frame.sample.data,
-				timestamp: frame.sample.dts / frame.track.timescale,
+				timestamp,
+				duration,
 			})
 
 			console.log(`[VideoWorker] Decoding chunk, type: ${chunk.type}, size: ${chunk.byteLength}`)
@@ -172,4 +176,8 @@ export class Renderer {
 			}
 		}
 	}
+}
+
+function toMicroseconds(value: number, timescale: number): number {
+	return Math.round((value * 1_000_000) / timescale)
 }

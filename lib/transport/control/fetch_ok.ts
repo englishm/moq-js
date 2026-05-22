@@ -1,4 +1,4 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters, Location, KeyValuePairs } from "../base_data"
 
@@ -19,12 +19,9 @@ export namespace FetchOk {
 		payloadBuf.putU8(v.end_of_track)
 		payloadBuf.putBytes(Location.serialize(v.end_location))
 		const params = v.params ?? new Map()
-		payloadBuf.putVarInt(BigInt(params.size))
 		payloadBuf.putBytes(Parameters.serialize(params))
 		const extensions = v.track_extensions ?? new Map()
-		const extBytes = KeyValuePairs.serialize(extensions)
-		payloadBuf.putVarInt(BigInt(extBytes.length))
-		payloadBuf.putBytes(extBytes)
+		payloadBuf.putBytes(KeyValuePairs.serialize(extensions))
 
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)
@@ -40,11 +37,9 @@ export namespace FetchOk {
 		if (numParams > 0) {
 			params = Parameters.deserialize_with_count(reader, Number(numParams))
 		}
-		const extLength = reader.getNumberVarInt()
 		let track_extensions: KeyValuePairs | undefined
-		if (extLength > 0) {
-			const extData = reader.getBytes(Number(extLength))
-			track_extensions = KeyValuePairs.deserialize(new ImmutableBytesBuffer(extData))
+		if (reader.remaining > 0) {
+			track_extensions = KeyValuePairs.deserialize(reader)
 		}
 		return {
 			id,

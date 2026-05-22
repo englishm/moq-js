@@ -1,4 +1,4 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Tuple, Parameters } from "../base_data"
 
@@ -17,9 +17,7 @@ export namespace TrackStatus {
 		payloadBuf.putVarInt(v.id)
 		payloadBuf.putBytes(Tuple.serialize(v.namespace))
 		payloadBuf.putUtf8String(v.name)
-		const paramsBytes = Parameters.serialize(v.params)
-		payloadBuf.putVarInt(v.params.size) // Number of Parameters
-		payloadBuf.putBytes(paramsBytes)
+		payloadBuf.putBytes(Parameters.serialize(v.params))
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)
 		return mainBuf.Uint8Array

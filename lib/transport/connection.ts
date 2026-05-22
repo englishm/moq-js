@@ -5,6 +5,7 @@ import { ControlStream } from "./stream"
 
 import { Publisher } from "./publisher"
 import { Subscriber } from "./subscriber"
+import type { SubscribeRequestOptions } from "./subscriber"
 
 export class Connection {
 	// The established WebTransport session.
@@ -52,8 +53,8 @@ export class Connection {
 		return this.#subscriber.publishedNamespaces()
 	}
 
-	subscribe(namespace: string[], track: string) {
-		return this.#subscriber.subscribe(namespace, track)
+	subscribe(namespace: string[], track: string, opts?: SubscribeRequestOptions) {
+		return this.#subscriber.subscribe(namespace, track, opts)
 	}
 
 	unsubscribe(track: string) {
@@ -95,16 +96,32 @@ export class Connection {
 	}
 
 	async #recv(msg: Control.MessageWithType) {
-		// RequestOk and RequestError can be sent by either side,
-		// so route based on request ID parity (even=subscriber-initiated, odd=publisher-initiated)
+		if (msg.type === Control.ControlMessageType.GoAway) {
+			return
+		}
+		if (msg.type === Control.ControlMessageType.MaxRequestId) {
+			this.#controlStream.applyMaxRequestId(msg.message)
+			return
+		}
+		if (msg.type === Control.ControlMessageType.RequestsBlocked) {
+			this.#controlStream.handleRequestsBlocked(msg.message)
+			return
+		}
+		if (isNewRequest(msg)) {
+			this.#controlStream.validateIncomingRequestId(msg.message.id)
+		}
+
+		// REQUEST_OK/REQUEST_ERROR are responses; route them to the role that owns
+		// the original local request. Request ID parity is client/server scoped, not
+		// publisher/subscriber scoped.
 		if (msg.type === Control.ControlMessageType.RequestOk || msg.type === Control.ControlMessageType.RequestError) {
 			const id = (msg.message as { id: bigint }).id
-			if (id % 2n === 0n) {
-				// Even request ID = subscriber-initiated request, response goes to subscriber
+			if (this.#subscriber.hasOutstandingRequest(id)) {
 				await this.#subscriber.recv(msg)
-			} else {
-				// Odd request ID = publisher-initiated request, response goes to publisher
+			} else if (this.#publisher.hasOutstandingRequest(id)) {
 				await this.#publisher.recv(msg)
+			} else {
+				throw new Error(`response for unknown request: ${id}`)
 			}
 		} else if (Control.isPublisher(msg.type)) {
 			await this.#subscriber.recv(msg)
@@ -120,5 +137,20 @@ export class Connection {
 		} catch (e) {
 			return asError(e)
 		}
+	}
+}
+
+function isNewRequest(msg: Control.MessageWithType): msg is Control.MessageWithType & { message: { id: bigint } } {
+	switch (msg.type) {
+		case Control.ControlMessageType.Subscribe:
+		case Control.ControlMessageType.SubscribeUpdate:
+		case Control.ControlMessageType.SubscribeNamespace:
+		case Control.ControlMessageType.Publish:
+		case Control.ControlMessageType.PublishNamespace:
+		case Control.ControlMessageType.Fetch:
+		case Control.ControlMessageType.TrackStatus:
+			return true
+		default:
+			return false
 	}
 }

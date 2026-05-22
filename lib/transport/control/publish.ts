@@ -1,6 +1,6 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Parameters, Location, Tuple, KeyValuePairs } from "../base_data"
+import { Parameters, Tuple, KeyValuePairs } from "../base_data"
 
 export interface Publish {
 	id: bigint
@@ -21,12 +21,9 @@ export namespace Publish {
 		payloadBuf.putUtf8String(v.name)
 		payloadBuf.putVarInt(v.track_alias)
 		const params = v.params ?? new Map()
-		payloadBuf.putVarInt(BigInt(params.size))
 		payloadBuf.putBytes(Parameters.serialize(params))
 		const extensions = v.track_extensions ?? new Map()
-		const extBytes = KeyValuePairs.serialize(extensions)
-		payloadBuf.putVarInt(BigInt(extBytes.length))
-		payloadBuf.putBytes(extBytes)
+		payloadBuf.putBytes(KeyValuePairs.serialize(extensions))
 
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)
@@ -43,11 +40,9 @@ export namespace Publish {
 		if (numParams > 0) {
 			params = Parameters.deserialize_with_count(reader, Number(numParams))
 		}
-		const extLength = reader.getNumberVarInt()
 		let track_extensions: KeyValuePairs | undefined
-		if (extLength > 0) {
-			const extData = reader.getBytes(Number(extLength))
-			track_extensions = KeyValuePairs.deserialize(new ImmutableBytesBuffer(extData))
+		if (reader.remaining > 0) {
+			track_extensions = KeyValuePairs.deserialize(reader)
 		}
 		return {
 			id,

@@ -22,20 +22,23 @@ import {
 	RequestsBlocked,
 	RequestOk,
 	RequestError,
+	GoAway,
 } from "./control"
 import { debug } from "./utils"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } from "./buffer"
+import { RequestId } from "./request_id"
 
 export class ControlStream {
 	private decoder: Decoder
 	private encoder: Encoder
-	#nextRequestId = 0n
+	#requestId: RequestId
 
 	#mutex = Promise.resolve()
 
-	constructor(c: ReadableWritableStreamBuffer) {
+	constructor(c: ReadableWritableStreamBuffer, requestId = RequestId.client(0n, 0n)) {
 		this.decoder = new Decoder(c)
 		this.encoder = new Encoder(c)
+		this.#requestId = requestId
 	}
 
 	// Will error if two messages are read at once.
@@ -73,10 +76,32 @@ export class ControlStream {
 		return lock
 	}
 
-	nextRequestId(incr: bigint = 2n): bigint {
-		const id = this.#nextRequestId
-		this.#nextRequestId += incr
-		return id
+	async nextRequestId(): Promise<bigint> {
+		const allocation = this.#requestId.allocate()
+		if (allocation.type === "allocated") {
+			return allocation.id
+		}
+
+		if (allocation.should_send_requests_blocked) {
+			await this.send({
+				type: ControlMessageType.RequestsBlocked,
+				message: { maximum_request_id: allocation.max_request_id },
+			})
+		}
+
+		throw new Error("request ID limit reached")
+	}
+
+	applyMaxRequestId(msg: MaxRequestId) {
+		this.#requestId.applyMaxRequestId(msg)
+	}
+
+	validateIncomingRequestId(id: bigint) {
+		this.#requestId.validateIncoming(id)
+	}
+
+	handleRequestsBlocked(msg: RequestsBlocked) {
+		this.#requestId.handleRequestsBlocked(msg)
 	}
 }
 
@@ -107,6 +132,12 @@ export class Decoder {
 
 		let res: MessageWithType
 		switch (t) {
+			case ControlMessageType.GoAway:
+				res = {
+					type: t,
+					message: GoAway.deserialize(payload),
+				}
+				break
 			case ControlMessageType.Subscribe:
 				res = {
 					type: t,
@@ -251,6 +282,8 @@ export class Encoder {
 	message(m: MessageWithType): Uint8Array {
 		const { message } = m
 		switch (m.type) {
+			case ControlMessageType.GoAway:
+				return GoAway.serialize(message as GoAway)
 			case ControlMessageType.Subscribe:
 				return Subscribe.serialize(message as Subscribe)
 			case ControlMessageType.SubscribeOk:

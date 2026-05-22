@@ -176,7 +176,7 @@ export class VideoMoq extends HTMLElement {
 	/**
 	 * Sets the player attribute and configures info related to a successful connection
 	 * */
-	private setPlayer(player: Player) {
+	private async setPlayer(player: Player) {
 		this.player = player
 
 		this.player.addEventListener("play", () => this.dispatchEvent(new Event("play")))
@@ -191,15 +191,17 @@ export class VideoMoq extends HTMLElement {
 		})
 		this.player.addEventListener("error", (e) => this.dispatchEvent(new CustomEvent("error", { detail: e })))
 
+		if (this.hasAttribute("muted")) {
+			await this.mute()
+		}
+
+		if (this.hasAttribute("autoplay")) {
+			await this.play()
+		}
+
 		if (!this.player.isPaused() && this.#playButton) {
 			this.#playButton.innerHTML = PAUSE_SVG
 			this.#playButton.ariaLabel = "Pause"
-
-			// TODO: Seems like I have to wait till subscriptions are done to automute and/or autoplay
-			// const automute = this.getAttribute("muted");
-			// if (automute !== null && automute) {
-			// 	this.mute();
-			// }
 
 			// Correct the icon if not muted
 			if (!this.muted && this.#volumeButton) {
@@ -242,10 +244,14 @@ export class VideoMoq extends HTMLElement {
 
 		const trackNumStr = urlParams.get("trackNum") || this.trackNum
 		const trackNum: number = this.auxParseInt(trackNumStr, 0)
-		Player.create(
+		void Player.create(
 			{ url: url.origin, fingerprint: fingerprint ?? undefined, canvas: this.#canvas, namespace },
 			trackNum,
 		)
+			.then((player) => this.setPlayer(player))
+			.catch((error) => {
+				this.fail(error instanceof Error ? error : new Error(String(error)))
+			})
 
 		if (this.controls !== null) {
 			const controlsElement = document.createElement("div")

@@ -1,4 +1,4 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters } from "../base_data"
 
@@ -13,7 +13,6 @@ export namespace PublishOk {
 		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
 		payloadBuf.putVarInt(v.id)
 		const params = v.params ?? new Map()
-		payloadBuf.putVarInt(BigInt(params.size))
 		payloadBuf.putBytes(Parameters.serialize(params))
 
 		mainBuf.putU16(payloadBuf.byteLength)

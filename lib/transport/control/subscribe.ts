@@ -1,6 +1,6 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Tuple, Parameters } from "../base_data"
+import { Location, Tuple, Parameters } from "../base_data"
 
 export enum GroupOrder {
 	Publisher = 0x0,
@@ -61,6 +61,41 @@ export namespace FilterType {
 	}
 }
 
+export type SubscriptionFilter =
+	| { type: FilterType.NextGroupStart }
+	| { type: FilterType.LargestObject }
+	| { type: FilterType.AbsoluteStart; start: Location }
+	| { type: FilterType.AbsoluteRange; start: Location; endGroup: number | bigint }
+
+export namespace SubscriptionFilter {
+	export function serialize(filter: SubscriptionFilter): Uint8Array {
+		const buf = new MutableBytesBuffer(new Uint8Array())
+		buf.putBytes(FilterType.serialize(filter.type))
+
+		if (filter.type === FilterType.AbsoluteStart || filter.type === FilterType.AbsoluteRange) {
+			buf.putBytes(Location.serialize(filter.start))
+		}
+		if (filter.type === FilterType.AbsoluteRange) {
+			buf.putVarInt(filter.endGroup)
+		}
+
+		return buf.Uint8Array
+	}
+
+	export function deserialize(buffer: ImmutableBytesBuffer): SubscriptionFilter {
+		const type = FilterType.deserialize(buffer)
+		switch (type) {
+			case FilterType.NextGroupStart:
+			case FilterType.LargestObject:
+				return { type }
+			case FilterType.AbsoluteStart:
+				return { type, start: Location.deserialize(buffer) }
+			case FilterType.AbsoluteRange:
+				return { type, start: Location.deserialize(buffer), endGroup: buffer.getVarInt() }
+		}
+	}
+}
+
 export interface Subscribe {
 	id: bigint // Request ID
 	namespace: Tuple
@@ -76,10 +111,7 @@ export namespace Subscribe {
 		payloadBuf.putVarInt(v.id)
 		payloadBuf.putBytes(Tuple.serialize(v.namespace))
 		payloadBuf.putUtf8String(v.name)
-		// Draft-16: inline parameters moved to Parameters KVP
-		const paramsBytes = Parameters.serialize(v.params)
-		payloadBuf.putVarInt(v.params.size) // Number of Parameters
-		payloadBuf.putBytes(paramsBytes)
+		payloadBuf.putBytes(Parameters.serialize(v.params))
 
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)
@@ -90,8 +122,7 @@ export namespace Subscribe {
 		const id = reader.getVarInt()
 		const namespace = Tuple.deserialize(reader)
 		const name = reader.getUtf8String()
-		const numParams = reader.getNumberVarInt()
-		const params = Parameters.deserialize_with_count(reader, numParams)
+		const params = Parameters.deserialize(reader)
 		return {
 			id,
 			namespace,

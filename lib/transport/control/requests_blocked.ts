@@ -1,4 +1,4 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 
 // Draft-16: REQUESTS_BLOCKED (Section 9.6, type 0x1A)

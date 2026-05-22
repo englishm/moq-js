@@ -14,7 +14,7 @@ export class Publisher {
 
 	// Our announced tracks.
 	#publishedNamespaces = new Map<string, PublishNamespaceSend>()
-	#waitingPublishNamespaceRequests = new Map<bigint, string>()
+	#pendingPublishNamespaceRequests = new Map<bigint, string>()
 
 	// Their subscribed tracks.
 	#subscribe = new Map<bigint, SubscribeRecv>()
@@ -35,8 +35,8 @@ export class Publisher {
 
 		const publishNamespaceSend = new PublishNamespaceSend(this.#control, namespace)
 		this.#publishedNamespaces.set(namespace.join("/"), publishNamespaceSend)
-		const id = this.#control.nextRequestId()
-		this.#waitingPublishNamespaceRequests.set(id, namespace.join("/"))
+		const id = await this.#control.nextRequestId()
+		this.#pendingPublishNamespaceRequests.set(id, namespace.join("/"))
 
 		await this.#control.send({
 			type: Control.ControlMessageType.PublishNamespace,
@@ -52,6 +52,10 @@ export class Publisher {
 	// Receive the next new subscription
 	async subscribed() {
 		return await this.#subscribeQueue.next()
+	}
+
+	hasOutstandingRequest(id: bigint) {
+		return this.#pendingPublishNamespaceRequests.has(id)
 	}
 
 	async recv(msg: Control.MessageWithType) {
@@ -75,7 +79,7 @@ export class Publisher {
 	}
 
 	recvRequestOk(msg: Control.RequestOk) {
-		const namespace = this.#waitingPublishNamespaceRequests.get(msg.id)
+		const namespace = this.#pendingPublishNamespaceRequests.get(msg.id)
 		if (!namespace) {
 			throw new Error(`request OK for unknown request: ${msg.id}`)
 		}
@@ -84,12 +88,13 @@ export class Publisher {
 			throw new Error(`no active published namespace: ${namespace}`)
 		}
 
+		this.#pendingPublishNamespaceRequests.delete(msg.id)
 		publishNamespaceSend.onOk()
 		console.log("published namespace:", namespace)
 	}
 
 	recvRequestError(msg: Control.RequestError) {
-		const namespace = this.#waitingPublishNamespaceRequests.get(msg.id)
+		const namespace = this.#pendingPublishNamespaceRequests.get(msg.id)
 		if (!namespace) {
 			throw new Error(`request error for unknown request: ${msg.id}`)
 		}
@@ -100,6 +105,7 @@ export class Publisher {
 			return
 		}
 
+		this.#pendingPublishNamespaceRequests.delete(msg.id)
 		publishNamespaceSend.onError(msg.code, msg.reason)
 	}
 

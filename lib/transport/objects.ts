@@ -1,5 +1,6 @@
 import { SubgroupHeader, SubgroupObject, SubgroupReader, SubgroupType, SubgroupWriter } from "./subgroup"
-import { KeyValuePairs } from "./base_data"
+import { ExtensionHeaders, KeyValuePairs } from "./base_data"
+import { Status } from "./object_status"
 import { debug } from "./utils"
 import {
 	ImmutableBytesBuffer,
@@ -10,40 +11,11 @@ import {
 	Writer,
 } from "./buffer"
 
+export { Status } from "./object_status"
+
 export enum ObjectForwardingPreference {
 	Datagram = "Datagram",
 	Subgroup = "Subgroup",
-}
-
-export enum Status {
-	NORMAL = 0,
-	GROUP_END = 3,
-	TRACK_END = 4,
-}
-
-export namespace Status {
-	export function serialize(status: Status): Uint8Array {
-		const w = new MutableBytesBuffer(new Uint8Array())
-		w.putVarInt(status)
-		return w.Uint8Array
-	}
-	export function deserialize(reader: ImmutableBytesBuffer): Status {
-		return try_from(reader.getNumberVarInt())
-	}
-	export function try_from(value: number | bigint) {
-		const v = typeof value === "bigint" ? Number(value) : value
-
-		switch (v) {
-			case 0:
-				return Status.NORMAL
-			case 3:
-				return Status.GROUP_END
-			case 4:
-				return Status.TRACK_END
-			default:
-				throw new Error(`invalid object status: ${v}`)
-		}
-	}
 }
 
 export interface Object {
@@ -179,10 +151,13 @@ export namespace ObjectDatagram {
 		if (!ObjectDatagramType.hasDefaultPriority(obj.type) && obj.publisher_priority !== undefined) {
 			buf.putU8(obj.publisher_priority)
 		}
-		if (ObjectDatagramType.hasExtensions(obj.type) && obj.extension_headers) {
-			const extHeadersBytes = KeyValuePairs.serialize(obj.extension_headers)
-			buf.putVarInt(extHeadersBytes.length)
-			buf.putBytes(extHeadersBytes)
+		const hasExtensions = ObjectDatagramType.hasExtensions(obj.type)
+		if (hasExtensions) {
+			const extensionHeaders = obj.extension_headers ?? new Map()
+			if (ObjectDatagramType.hasStatus(obj.type) && obj.status !== undefined && obj.status !== Status.NORMAL && extensionHeaders.size > 0) {
+				throw new Error("non-normal object status cannot include extensions")
+			}
+			buf.putBytes(ExtensionHeaders.serialize(extensionHeaders, false))
 		}
 		if (ObjectDatagramType.hasStatus(obj.type)) {
 			if (obj.status !== undefined) {
@@ -210,14 +185,15 @@ export namespace ObjectDatagram {
 		}
 		let extHeaders: KeyValuePairs | undefined
 		if (ObjectDatagramType.hasExtensions(type)) {
-			const extHeadersBytesLength = reader.getNumberVarInt()
-			const extHeadersData = reader.getBytes(extHeadersBytesLength)
-			extHeaders = KeyValuePairs.deserialize(new ImmutableBytesBuffer(extHeadersData))
+			extHeaders = ExtensionHeaders.deserialize(reader, false)
 		}
 		let status: Status | undefined
 		let payload: Uint8Array | undefined
 		if (ObjectDatagramType.hasStatus(type)) {
 			status = Status.try_from(reader.getNumberVarInt())
+			if (status !== Status.NORMAL && extHeaders && extHeaders.size > 0) {
+				throw new Error("non-normal object status cannot include extensions")
+			}
 		} else {
 			payload = reader.getBytes(reader.remaining)
 		}

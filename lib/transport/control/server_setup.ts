@@ -1,4 +1,4 @@
-import { ControlMessageType, Version } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters } from "../base_data"
 
@@ -11,9 +11,7 @@ export namespace ServerSetup {
 		const mainBuf = new MutableBytesBuffer(new Uint8Array())
 		mainBuf.putVarInt(ControlMessageType.ServerSetup)
 		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
-		const paramsBytes = Parameters.serialize(v.params)
-		payloadBuf.putVarInt(v.params.size)
-		payloadBuf.putBytes(paramsBytes)
+		payloadBuf.putBytes(Parameters.serialize(v.params))
 
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)

@@ -77,6 +77,8 @@
 		<script>
 			// Simple configuration setup - let the component handle everything else
 			document.addEventListener("DOMContentLoaded", () => {
+				const urlParams = new URLSearchParams(window.location.search);
+				const relayUrl = urlParams.get("relay") || window.MoQConfig.getRelayUrl();
 				const publisherElement = document.getElementById("publisher");
 				const currentEnv = document.getElementById("currentEnv");
 				const currentRelay = document.getElementById("currentRelay");
@@ -84,11 +86,11 @@
 
 				// Update config display
 				if (currentEnv) currentEnv.textContent = window.MoQConfig.getEnvironment();
-				if (currentRelay) currentRelay.textContent = window.MoQConfig.getRelayUrl();
+				if (currentRelay) currentRelay.textContent = relayUrl;
 
 				// Configure the publisher component
 				if (publisherElement) {
-					publisherElement.setAttribute("src", window.MoQConfig.getRelayUrl());
+					publisherElement.setAttribute("src", relayUrl);
 
 					if (window.MoQConfig.getFingerprintUrl()) {
 						publisherElement.setAttribute("fingerprint", window.MoQConfig.getFingerprintUrl());
@@ -96,12 +98,16 @@
 
 					// Set the playback base URL for the component's generated player links
 					const baseUrl = window.location.origin + window.location.pathname.replace("index.html", "");
-					publisherElement.setAttribute("playbackbaseurl", `${baseUrl}player.html?namespace=`);
+					const playerParams = new URLSearchParams();
+					if (urlParams.has("relay")) {
+						playerParams.set("relay", relayUrl);
+					}
+					const query = playerParams.toString();
+					publisherElement.setAttribute("playbackbaseurl", `${baseUrl}player.html${query ? `?${query}&` : "?"}namespace=`);
 					// Source - https://stackoverflow.com/a
 					// Posted by Artem Barger, modified by community. See post 'Timeline' for change history
 					// Retrieved 2025-11-13, License - CC BY-SA 4.0
 
-					const urlParams = new URLSearchParams(window.location.search);
 					const namespace = urlParams.get("namespace");
 					if (namespace) {
 						publisherElement.setAttribute("namespace", namespace);

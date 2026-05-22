@@ -1,6 +1,6 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Parameters, Tuple, KeyValuePairs } from "../base_data"
+import { Parameters, Tuple } from "../base_data"
 
 export interface PublishNamespace {
 	id: bigint
@@ -18,9 +18,7 @@ export namespace PublishNamespace {
 		payloadBuf.putBytes(Tuple.serialize(v.namespace))
 		// Draft-16: Number of Parameters + delta-encoded parameters
 		const params = v.params ?? new Map()
-		const paramsBytes = KeyValuePairs.serialize(params)
-		payloadBuf.putVarInt(params.size)
-		payloadBuf.putBytes(paramsBytes)
+		payloadBuf.putBytes(Parameters.serialize(params))
 
 		mainBuf.putU16(payloadBuf.byteLength)
 		mainBuf.putBytes(payloadBuf.Uint8Array)
