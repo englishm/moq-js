@@ -2,9 +2,12 @@ import * as Control from "./control"
 import { Objects } from "./objects"
 import { asError } from "../common/error"
 import { ControlStream } from "./stream"
+import { getLogger } from "../common/logger"
 
 import { Publisher } from "./publisher"
 import { Subscriber } from "./subscriber"
+
+const log = getLogger()
 
 export class Connection {
 	// The established WebTransport session.
@@ -67,29 +70,29 @@ export class Connection {
 	async #runControl() {
 		// Receive messages until the connection is closed.
 		try {
-			console.log("starting control loop")
-			for (; ;) {
+			log.debug("starting control loop")
+			for (;;) {
 				const msg = await this.#controlStream.recv()
 				await this.#recv(msg)
 			}
 		} catch (e) {
-			console.error("Error in control stream:", e)
+			log.error("control stream error", e)
 			throw e
 		}
 	}
 
 	async #runObjects() {
 		try {
-			console.log("starting object loop")
-			for (; ;) {
+			log.debug("starting object loop")
+			for (;;) {
 				const obj = await this.#objects.recv()
-				console.log("object loop got obj", obj)
+				log.trace("object loop got obj", obj)
 				if (!obj) break
 
 				await this.#subscriber.recvObject(obj)
 			}
 		} catch (e) {
-			console.error("Error in object stream:", e)
+			log.error("object stream error", e)
 			throw e
 		}
 	}

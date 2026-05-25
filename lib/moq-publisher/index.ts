@@ -1,5 +1,8 @@
 import STYLE_SHEET from "./publisher-moq.css"
 import { PublisherApi, PublisherOptions } from "../publish"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export class PublisherMoq extends HTMLElement {
 	private shadow: ShadowRoot
@@ -13,6 +16,15 @@ export class PublisherMoq extends HTMLElement {
 	private publisher?: PublisherApi
 	private isPublishing = false
 	private namespace = ""
+
+	// Arrow properties so they can be passed directly to addEventListener/removeEventListener
+	// without losing `this` context and without triggering no-misused-promises.
+	private readonly onDeviceChange = () => {
+		this.populateDeviceLists().catch((e) => log.error("populateDeviceLists failed", e))
+	}
+	private readonly onConnectClick = () => {
+		this.handleClick().catch((e) => log.error("handleClick failed", e))
+	}
 
 	constructor() {
 		super()
@@ -52,27 +64,23 @@ export class PublisherMoq extends HTMLElement {
 		)
 		this.shadow.appendChild(container)
 
-		// Bindings
-		this.handleDeviceChange = this.handleDeviceChange.bind(this)
-		this.handleClick = this.handleClick.bind(this)
-
 		// Listeners
-		navigator.mediaDevices.addEventListener("devicechange", this.handleDeviceChange)
-		this.cameraSelect.addEventListener("change", () => this.startPreview())
-		this.microphoneSelect.addEventListener("change", () => this.startPreview())
-		this.connectButton.addEventListener("click", this.handleClick)
+		navigator.mediaDevices.addEventListener("devicechange", this.onDeviceChange)
+		this.cameraSelect.addEventListener("change", () => {
+			this.startPreview().catch((e) => log.error("startPreview failed", e))
+		})
+		this.microphoneSelect.addEventListener("change", () => {
+			this.startPreview().catch((e) => log.error("startPreview failed", e))
+		})
+		this.connectButton.addEventListener("click", this.onConnectClick)
 	}
 
 	connectedCallback() {
-		this.populateDeviceLists()
+		this.populateDeviceLists().catch((e) => log.error("populateDeviceLists failed", e))
 	}
 
 	disconnectedCallback() {
-		navigator.mediaDevices.removeEventListener("devicechange", this.handleDeviceChange)
-	}
-
-	private async handleDeviceChange() {
-		await this.populateDeviceLists()
+		navigator.mediaDevices.removeEventListener("devicechange", this.onDeviceChange)
 	}
 
 	private async populateDeviceLists() {
@@ -121,7 +129,7 @@ export class PublisherMoq extends HTMLElement {
 	private async handleClick() {
 		if (!this.isPublishing) {
 			if (!this.mediaStream) {
-				console.warn("No media stream available")
+				log.warn("No media stream available")
 				return
 			}
 
@@ -130,7 +138,7 @@ export class PublisherMoq extends HTMLElement {
 			const audioTrack = this.mediaStream.getAudioTracks()[0]
 			const settings = audioTrack.getSettings()
 
-			const sampleRate = settings.sampleRate ?? (await new AudioContext()).sampleRate
+			const sampleRate = settings.sampleRate ?? new AudioContext().sampleRate
 			const numberOfChannels = settings.channelCount ?? 2
 
 			// H.264 requires even dimensions - round down to nearest even number
@@ -156,7 +164,7 @@ export class PublisherMoq extends HTMLElement {
 				audio: audioConfig,
 			}
 
-			console.log("Publisher Options", opts)
+			log.debug("Publisher Options", opts)
 
 			this.publisher = new PublisherApi(opts)
 
@@ -175,13 +183,13 @@ export class PublisherMoq extends HTMLElement {
 				}
 				this.playbackUrlTextarea.style.display = "block"
 			} catch (err) {
-				console.error("Publish failed:", err)
+				log.error("Publish failed:", err)
 			}
 		} else {
 			try {
 				await this.publisher!.stop()
 			} catch (err) {
-				console.error("Stop failed:", err)
+				log.error("Stop failed:", err)
 			} finally {
 				this.isPublishing = false
 				this.connectButton.textContent = "Connect"
@@ -195,3 +203,7 @@ export class PublisherMoq extends HTMLElement {
 
 customElements.define("publisher-moq", PublisherMoq)
 export default PublisherMoq
+
+// Re-export logger API so consumers of @moq-js/player/moq-publisher can configure logging.
+export { setGlobalLogger, getGlobalLogger, createConsoleLogger, notifyLoggerLevelChanged } from "../common/logger"
+export type { Logger, LogLevel } from "../common/logger"

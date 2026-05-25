@@ -7,6 +7,7 @@ import MediaWorker from "web-worker:./worker/index.ts"
 import { RingShared } from "../common/ring"
 import { Root, isAudioTrack } from "../media/catalog"
 import { SubgroupHeader } from "../transport/subgroup"
+import { getGlobalLogger, installWorkerLogReceiver, onLoggerLevelChange } from "../common/logger"
 
 export interface PlayerConfig {
 	canvas: OffscreenCanvas
@@ -26,11 +27,22 @@ export default class Backend {
 
 	#eventTarget: EventTarget
 
+	// Dispose function for the logger level change listener
+	#disposeLoggerListener: () => void
+
 	constructor(config: PlayerConfig, eventTarget: EventTarget) {
 		// TODO does this block the main thread? If so, make this async
 		this.#worker = new MediaWorker()
-		this.#worker.addEventListener("message", this.on.bind(this))
+		this.#worker.addEventListener("message", this.#on.bind(this))
 		this.#eventTarget = eventTarget
+
+		// Install log receiver so worker log records appear in the global logger.
+		installWorkerLogReceiver(this.#worker)
+
+		// Keep the worker's cached log level in sync whenever the global logger changes.
+		this.#disposeLoggerListener = onLoggerLevelChange((level) => {
+			this.send({ logLevel: level })
+		})
 
 		let sampleRate: number | undefined
 		let channels: number | undefined
@@ -67,6 +79,11 @@ export default class Backend {
 		}
 
 		this.send({ config: msg }, msg.video.canvas)
+
+		// Send the initial log level to the worker.
+		const logger = getGlobalLogger()
+		const initialLevel = typeof logger.level === "function" ? logger.level() : "error"
+		this.send({ logLevel: initialLevel })
 	}
 
 	pause() {
@@ -102,19 +119,21 @@ export default class Backend {
 	}
 
 	async close() {
+		this.#disposeLoggerListener()
 		this.#worker.terminate()
 		await this.#audio?.context.close()
 	}
 
 	// Enforce we're sending valid types to the worker
 	private send(msg: Message.ToWorker, ...transfer: Transferable[]) {
-		//console.log("sent message from main to worker", msg)
 		this.#worker.postMessage(msg, transfer)
 	}
 
-	private on(e: MessageEvent) {
-		const msg = e.data
-		if (msg === "waitingforkeyframe") {
+	#on(e: MessageEvent) {
+		// log records are already handled by installWorkerLogReceiver listener.
+		if ((e.data as { log?: unknown })?.log) return
+		// The video worker posts the raw string "waitingforkeyframe".
+		if (e.data === "waitingforkeyframe") {
 			this.#eventTarget.dispatchEvent(new Event("waitingforkeyframe"))
 		}
 	}

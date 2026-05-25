@@ -1,4 +1,7 @@
 import * as MP4 from "./index"
+import { getLogger } from "../../common/logger"
+
+const log = getLogger()
 
 export interface Frame {
 	track: MP4.Track // The track this frame belongs to
@@ -16,7 +19,7 @@ export class Parser {
 
 	constructor(init: Uint8Array) {
 		this.#mp4.onError = (err) => {
-			console.error("MP4 error", err)
+			log.error("MP4 error", err)
 		}
 
 		this.#mp4.onReady = (info: MP4.Info) => {

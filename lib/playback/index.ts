@@ -8,6 +8,13 @@ import Backend from "./backend"
 
 import { Client } from "../transport/client"
 import { SubgroupReader } from "../transport/subgroup"
+import { getLogger } from "../common/logger"
+
+// Re-export logger API so consumers of @moq-js/player/simple-player can configure logging.
+export { setGlobalLogger, getGlobalLogger, createConsoleLogger, notifyLoggerLevelChanged } from "../common/logger"
+export type { Logger, LogLevel } from "../common/logger"
+
+const log = getLogger()
 
 export type Range = Message.Range
 export type Timeline = Message.Timeline
@@ -66,7 +73,7 @@ export default class Player extends EventTarget {
 		this.#running = abort.catch(this.#close)
 
 		this.#run().catch((err) => {
-			console.error("Error in #run():", err)
+			log.error("error in run", err)
 			super.dispatchEvent(new CustomEvent("error", { detail: err }))
 			this.#abort(err)
 		})
@@ -77,7 +84,7 @@ export default class Player extends EventTarget {
 		const connection = await client.connect()
 
 		const catalog = await Catalog.fetch(connection, [config.namespace])
-		console.log("catalog", catalog)
+		log.debug("catalog", catalog)
 
 		const canvas = config.canvas.transferControlToOffscreen()
 
@@ -98,8 +105,8 @@ export default class Player extends EventTarget {
 			}
 		})
 
-		console.log("inits", inits)
-		console.log("tracks", tracks)
+		log.debug("inits", inits)
+		log.debug("tracks", tracks)
 
 		// Call #runInit on each unique init track
 		// TODO do this in parallel with #runTrack to remove a round trip
@@ -113,14 +120,14 @@ export default class Player extends EventTarget {
 	}
 
 	async #runInit(namespace: string, name: string) {
-		console.log("running #runInit", namespace, name)
+		log.debug("running runInit", namespace, name)
 		const sub = await this.#connection.subscribe([namespace], name)
 		try {
-			console.log("waiting for init data")
+			log.debug("waiting for init data")
 			const init = await Promise.race([sub.data(), this.#running])
 			if (!init) throw new Error("no init data")
 
-			console.log("got init data")
+			log.debug("got init data")
 			// We don't care what type of reader we get, we just want the payload.
 			const chunk = await init.read()
 			if (!chunk) throw new Error("no init chunk")
@@ -153,9 +160,9 @@ export default class Player extends EventTarget {
 		const sub = await this.#connection.subscribe(track.namespace, track.name)
 
 		try {
-			console.log("starting segment data loop")
-			for (; ;) {
-				console.log("waiting for segment data")
+			log.debug("starting segment data loop")
+			for (;;) {
+				log.trace("waiting for segment data")
 				const segment = await Promise.race([sub.data(), this.#running])
 				if (!segment) continue
 
@@ -188,9 +195,9 @@ export default class Player extends EventTarget {
 			}
 		} catch (error) {
 			if (error instanceof Error && error.message.includes("cancelled")) {
-				console.log("Cancelled subscription to track: ", track.name)
+				log.debug("cancelled subscription to track", track.name)
 			} else {
-				console.error("Error in #runTrack:", error)
+				log.error("error in runTrack", error)
 				super.dispatchEvent(new CustomEvent("error", { detail: error }))
 			}
 		} finally {
@@ -200,7 +207,7 @@ export default class Player extends EventTarget {
 
 	#runTrack(track: Catalog.Track) {
 		if (this.#trackTasks.has(track.name)) {
-			console.warn(`Already exist a runTrack task for the track: ${track.name}`)
+			log.warn(`runTrack task already exists for track: ${track.name}`)
 			return
 		}
 
@@ -209,7 +216,7 @@ export default class Player extends EventTarget {
 		this.#trackTasks.set(track.name, task)
 
 		task.catch((err) => {
-			console.error(`Error to subscribe to track ${track.name}`, err)
+			log.error(`error subscribing to track ${track.name}`, err)
 			super.dispatchEvent(new CustomEvent("error", { detail: err }))
 		}).finally(() => {
 			this.#trackTasks.delete(track.name)
@@ -230,7 +237,7 @@ export default class Player extends EventTarget {
 		if (this.#tracknum >= 0 && this.#tracknum < this.#catalog.tracks.length) {
 			return this.#catalog.tracks[this.#tracknum]
 		} else {
-			console.warn("Invalid track number:", this.#tracknum)
+			log.warn("invalid track number", this.#tracknum)
 			return null
 		}
 	}
@@ -266,10 +273,10 @@ export default class Player extends EventTarget {
 			return
 		}
 		if (currentTrack) {
-			console.log(`Unsubscribing from track: ${currentTrack.name} and Subscribing to track: ${trackname}`)
+			log.debug(`unsubscribing from ${currentTrack.name}, subscribing to ${trackname}`)
 			await this.unsubscribeFromTrack(currentTrack.name)
 		} else {
-			console.log(`Subscribing to track: ${trackname}`)
+			log.debug(`subscribing to track ${trackname}`)
 		}
 		this.#tracknum = this.#catalog.tracks.findIndex((track) => track.name === trackname)
 
@@ -279,11 +286,11 @@ export default class Player extends EventTarget {
 	async mute(isMuted: boolean) {
 		this.#muted = isMuted
 		if (isMuted) {
-			console.log("Unsubscribing from audio track: ", this.#audioTrackName)
+			log.debug("unsubscribing from audio track", this.#audioTrackName)
 			await this.unsubscribeFromTrack(this.#audioTrackName)
 			await this.#backend.mute()
 		} else {
-			console.log("Subscribing to audio track: ", this.#audioTrackName)
+			log.debug("subscribing to audio track", this.#audioTrackName)
 			this.subscribeFromTrackName(this.#audioTrackName)
 			await this.#backend.unmute()
 		}
@@ -291,7 +298,7 @@ export default class Player extends EventTarget {
 	}
 
 	async unsubscribeFromTrack(trackname: string) {
-		console.log(`Unsubscribing from track: ${trackname}`)
+		log.debug(`unsubscribing from track ${trackname}`)
 		super.dispatchEvent(new CustomEvent("unsubscribestared", { detail: { track: trackname } }))
 		await this.#connection.unsubscribe(trackname)
 		const task = this.#trackTasks.get(trackname)
@@ -302,14 +309,14 @@ export default class Player extends EventTarget {
 	}
 
 	subscribeFromTrackName(trackname: string) {
-		console.log(`Subscribing to track: ${trackname}`)
+		log.debug(`subscribing to track ${trackname}`)
 		const track = this.#tracksByName.get(trackname)
 		if (track) {
 			super.dispatchEvent(new CustomEvent("subscribestared", { detail: { track: trackname } }))
 			this.#runTrack(track)
 			super.dispatchEvent(new CustomEvent("subscribedone", { detail: { track: trackname } }))
 		} else {
-			console.warn(`Track ${trackname} not in #tracksByName`)
+			log.warn(`track ${trackname} not found`)
 		}
 	}
 
@@ -331,7 +338,7 @@ export default class Player extends EventTarget {
 		try {
 			await this.#running
 		} catch (e) {
-			console.error("Error in Player.closed():", e)
+			log.error("error in Player.closed", e)
 			return asError(e)
 		}
 	}
@@ -375,7 +382,7 @@ export default class Player extends EventTarget {
 			const audioPromise = this.unsubscribeFromTrack(this.#audioTrackName)
 			const videoPromise = this.unsubscribeFromTrack(this.#videoTrackName)
 			super.dispatchEvent(new CustomEvent("pause", { detail: { track: this.#videoTrackName } }))
-			console.log("dispatchEvent pause")
+			log.debug("dispatching pause event")
 
 			this.#backend.pause()
 			await Promise.all([mutePromise, audioPromise, videoPromise])

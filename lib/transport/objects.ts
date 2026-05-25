@@ -1,7 +1,17 @@
-import { SubgroupHeader, SubgroupObject, SubgroupReader, SubgroupType, SubgroupWriter } from "./subgroup"
+import { SubgroupHeader, SubgroupReader, SubgroupType, SubgroupWriter } from "./subgroup"
 import { KeyValuePairs } from "./base_data"
 import { debug } from "./utils"
-import { ImmutableBytesBuffer, MutableBytesBuffer, ReadableStreamBuffer, Reader, WritableStreamBuffer, Writer } from "./buffer"
+import {
+	ImmutableBytesBuffer,
+	MutableBytesBuffer,
+	ReadableStreamBuffer,
+	Reader,
+	WritableStreamBuffer,
+	Writer,
+} from "./buffer"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export enum ObjectForwardingPreference {
 	Datagram = "Datagram",
@@ -58,7 +68,6 @@ export interface Object {
 export function isDatagram(obj: ObjectDatagram | SubgroupHeader): boolean {
 	return obj.type in ObjectDatagramType
 }
-
 
 export enum ObjectDatagramType {
 	Type0x0 = 0x0,
@@ -180,7 +189,6 @@ export namespace ObjectDatagram {
 	}
 
 	export function deserialize(reader: ImmutableBytesBuffer): ObjectDatagram {
-
 		const type = reader.getNumberVarInt()
 		const alias = reader.getVarInt()
 		const group = reader.getNumberVarInt()
@@ -225,7 +233,7 @@ export class Objects {
 	}
 
 	async send(h: ObjectDatagram | SubgroupHeader): Promise<TrackWriter | SubgroupWriter> {
-		const is_datagram = isDatagram(h);
+		const is_datagram = isDatagram(h)
 
 		if (is_datagram) {
 			// Datagram mode
@@ -246,12 +254,11 @@ export class Objects {
 	}
 
 	async recv(): Promise<TrackReader | SubgroupReader | undefined> {
-		console.log("Objects.recv waiting for streams")
+		log.trace("waiting for incoming streams")
 		const streams = this.quic.incomingUnidirectionalStreams.getReader()
 
-		console.log("Objects.recv got streams", streams)
 		const { value, done } = await streams.read()
-		console.log("Objects.recv got value, done", value, done)
+		log.trace("got stream", { done })
 		streams.releaseLock()
 
 		if (done) return
@@ -262,7 +269,7 @@ export class Objects {
 		// Try to parse as SubgroupType
 		try {
 			const subgroupType = SubgroupType.try_from(type)
-			console.log("Objects.recv got type", subgroupType)
+			log.trace("parsed stream type", subgroupType)
 
 			const track_alias = await r.getVarInt()
 			const group_id = await r.getNumberVarInt()
@@ -287,12 +294,12 @@ export class Objects {
 				publisher_priority,
 			}
 
-			console.log("Objects.recv got subgroup header", h)
+			log.trace("parsed subgroup header", h)
 
 			return new SubgroupReader(h, r)
 		} catch (e) {
 			// Not a subgroup type, might be datagram or other type
-			console.log("transport/objects.ts: unknown stream type: ", type)
+			log.warn("unknown stream type", type)
 			throw new Error(`unknown stream type: ${type}`)
 		}
 	}
@@ -303,9 +310,7 @@ export class TrackWriter {
 	// For compatibility with reader interface
 	public header = { track_alias: 0n }
 
-	constructor(
-		public stream: Writer,
-	) { }
+	constructor(public stream: Writer) {}
 
 	async write(c: ObjectDatagram) {
 		return this.stream.write(ObjectDatagram.serialize(c))
@@ -316,15 +321,11 @@ export class TrackWriter {
 	}
 }
 
-
 export class TrackReader {
 	// Header with track_alias for routing
 	public header: { track_alias: bigint }
 
-	constructor(
-		stream: Reader,
-		track_alias: bigint = 0n,
-	) {
+	constructor(stream: Reader, track_alias: bigint = 0n) {
 		this.stream = stream
 		this.header = { track_alias }
 	}
@@ -372,4 +373,3 @@ export class TrackReader {
 		await this.stream.close()
 	}
 }
-

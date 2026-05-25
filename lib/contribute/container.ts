@@ -1,5 +1,8 @@
 import * as MP4 from "../media/mp4"
 import { Chunk } from "./chunk"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 type DecoderConfig = AudioDecoderConfig | VideoDecoderConfig
 type EncodedChunk = EncodedAudioChunk | EncodedVideoChunk
@@ -20,13 +23,13 @@ export class Container {
 			transform: (frame, controller) => {
 				try {
 					if (isDecoderConfig(frame)) {
-						console.log("Container received decoder config:", frame)
+						log.debug("received decoder config", frame)
 						return this.#init(frame, controller)
 					} else {
 						return this.#enqueue(frame, controller)
 					}
 				} catch (e) {
-					console.error("Container failed to process frame:", e)
+					log.error("failed to process frame", e)
 					throw e
 				}
 			},
@@ -125,7 +128,7 @@ export class Container {
 
 		// Moof and mdat atoms are written in pairs.
 		// TODO remove the moof/mdat from the Box to reclaim memory once everything works
-		for (; ;) {
+		for (;;) {
 			const moof = this.#mp4.moofs.shift()
 			const mdat = this.#mp4.mdats.shift()
 

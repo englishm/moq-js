@@ -5,6 +5,9 @@ import type { TrackReader } from "./objects"
 import { debug } from "./utils"
 import { ControlStream } from "./stream"
 import { SubgroupReader } from "./subgroup"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export interface TrackInfo {
 	track_alias: bigint
@@ -39,7 +42,7 @@ export class Subscriber {
 	}
 
 	async recv(msg: Control.MessageWithType) {
-		const { type, message } = msg;
+		const { type, message } = msg
 		switch (type) {
 			case Control.ControlMessageType.PublishNamespace:
 				await this.recvPublishNamespace(message)
@@ -68,7 +71,7 @@ export class Subscriber {
 
 		await this.#control.send({
 			type: Control.ControlMessageType.PublishNamespaceOk,
-			message: { id: msg.id }
+			message: { id: msg.id },
 		})
 
 		const publishNamespace = new PublishNamespaceRecv(this.#control, msg.namespace, msg.id)
@@ -89,7 +92,7 @@ export class Subscriber {
 			message: {
 				id,
 				namespace,
-			}
+			},
 		}
 		await this.#control.send(msg)
 	}
@@ -113,7 +116,7 @@ export class Subscriber {
 				filter_type: Control.FilterType.NextGroupStart,
 				forward: 1, // always forward
 				params: new Map(),
-			}
+			},
 		}
 
 		await this.#control.send(subscription_req)
@@ -126,17 +129,17 @@ export class Subscriber {
 		if (this.#trackToIDMap.has(track)) {
 			const trackID = this.#trackToIDMap.get(track)
 			if (trackID === undefined) {
-				console.warn(`Exception track ${track} not found in trackToIDMap.`)
+				log.warn(`track ${track} not found in trackToIDMap`)
 				return
 			}
 			try {
 				await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: trackID } })
 				this.#trackToIDMap.delete(track)
 			} catch (error) {
-				console.error(`Failed to unsubscribe from track ${track}:`, error)
+				log.error(`failed to unsubscribe from track ${track}`, error)
 			}
 		} else {
-			console.warn(`During unsubscribe request initiation attempt track ${track} not found in trackToIDMap.`)
+			log.warn(`unsubscribe attempted but track ${track} not found in trackToIDMap`)
 		}
 	}
 
@@ -156,7 +159,7 @@ export class Subscriber {
 			callback(msg.id)
 		}
 
-		console.log("subscribe ok", msg)
+		log.debug("subscribe ok", msg)
 		subscribe.onOk(msg.track_alias)
 	}
 
@@ -179,23 +182,23 @@ export class Subscriber {
 	}
 
 	async recvObject(reader: TrackReader | SubgroupReader) {
-		console.log("got object on recvObject", reader)
+		log.trace("recvObject", reader)
 		// Get track alias from reader header
 		const track_alias = reader.header.track_alias
 
 		// Map track alias back to subscription ID
 		const subscriptionId = this.#aliasToSubscriptionMap.get(track_alias)
-		console.log("got subscriptionId", subscriptionId)
+		log.trace("resolved subscriptionId", subscriptionId)
 		const callback = async (id: bigint) => {
 			const subscribe = this.#subscribe.get(id)
 			if (!subscribe) {
 				throw new Error(`data for unknown subscription: ${id}`)
 			}
-			console.log("doing subscribe on data", reader)
+			log.trace("dispatching data to subscription", reader)
 			return subscribe.onData(reader)
 		}
 		if (subscriptionId === undefined) {
-			console.warn(`Exception track alias ${track_alias} not found in aliasToSubscriptionMap.`)
+			log.warn(`track alias ${track_alias} not found in aliasToSubscriptionMap`)
 			this.#pendingTrack.set(track_alias, callback)
 			return
 		}
@@ -227,7 +230,7 @@ export class PublishNamespaceRecv {
 		// Send the control message.
 		return this.#control.send({
 			type: Control.ControlMessageType.PublishNamespaceOk,
-			message: { id: this.#id }
+			message: { id: this.#id },
 		})
 	}
 
@@ -237,7 +240,7 @@ export class PublishNamespaceRecv {
 
 		return this.#control.send({
 			type: Control.ControlMessageType.PublishNamespaceError,
-			message: { id: this.#id, code, reason }
+			message: { id: this.#id, code, reason },
 		})
 	}
 }
@@ -270,11 +273,11 @@ export class SubscribeSend {
 	}
 
 	onOk(trackAlias: bigint) {
-		console.log("setting track alias", trackAlias)
+		log.debug("setting track alias", trackAlias)
 		this.#trackAlias = trackAlias
 	}
 
-	// FIXME(itzmanish): implement correctly 
+	// FIXME(itzmanish): implement correctly
 	async onDone(code: bigint, streamCount: bigint, reason: string) {
 		throw new Error(`TODO onDone`)
 	}
@@ -293,7 +296,7 @@ export class SubscribeSend {
 	}
 
 	async onData(reader: TrackReader | SubgroupReader) {
-		console.log("subscribe send onData", reader)
+		log.trace("onData", reader)
 		if (!this.#data.closed()) await this.#data.push(reader)
 	}
 
