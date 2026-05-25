@@ -1,5 +1,6 @@
 import { SubgroupHeader } from "../../transport/subgroup"
 import { RingShared } from "../../common/ring"
+import type { LogLevel, WorkerLogRecord } from "../../common/logger"
 
 export interface Config {
 	audio?: ConfigAudio
@@ -78,6 +79,9 @@ export interface ToWorker {
 	segment?: Segment
 	play?: boolean
 
+	// Sent to update the worker's cached log level when setGlobalLogger is called.
+	logLevel?: LogLevel
+
 	/*
 	// Sent to control playback
 	play?: Play
@@ -89,6 +93,9 @@ export interface ToWorker {
 export interface FromWorker {
 	// Sent back to the main thread regularly to update the UI
 	timeline?: Timeline
+
+	// Log record forwarded from the worker to the main thread.
+	log?: WorkerLogRecord
 }
 
 /*

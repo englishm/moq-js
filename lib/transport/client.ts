@@ -7,6 +7,9 @@ import { SetupParameters } from "./control/setup_parameters"
 import { Parameters } from "./base_data"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer } from "./buffer"
 import { RequestId, maxRequestIdFromParams } from "./request_id"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export const DEFAULT_MAX_REQUEST_ID = 64n
 export const MOQ_TRANSPORT_PROTOCOL = "moqt-16"
@@ -33,7 +36,7 @@ export class Client {
 		this.config = config
 
 		this.#fingerprint = this.#fetchFingerprint(config.fingerprint).catch((e) => {
-			console.warn("failed to fetch fingerprint: ", e)
+			log.warn("failed to fetch fingerprint", e)
 			return undefined
 		})
 	}

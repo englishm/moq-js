@@ -3,7 +3,10 @@ import { ControlStream } from "./stream"
 import { Queue, Watch } from "../common/async"
 import { Objects, TrackWriter, ObjectDatagramType } from "./objects"
 import { SubgroupType, SubgroupWriter } from "./subgroup"
-import { Parameters, ParameterType } from "./base_data"
+import { Parameters } from "./base_data"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export class Publisher {
 	// Used to send control messages
@@ -90,7 +93,7 @@ export class Publisher {
 
 		this.#pendingPublishNamespaceRequests.delete(msg.id)
 		publishNamespaceSend.onOk()
-		console.log("published namespace:", namespace)
+		log.debug("published namespace", namespace)
 	}
 
 	recvRequestError(msg: Control.RequestError) {
@@ -100,8 +103,8 @@ export class Publisher {
 		}
 		const publishNamespaceSend = this.#publishedNamespaces.get(namespace)
 		if (!publishNamespaceSend) {
-			// TODO debug this
-			console.warn(`request error for unknown namespace: ${namespace}`)
+			// TODO(itzmanish): debug this
+			log.warn(`request error for unknown namespace: ${namespace}`)
 			return
 		}
 
@@ -138,7 +141,7 @@ export class Publisher {
 		if (!subscribe) {
 			throw new Error(`unsubscribe for unknown subscribe: ${msg.id}`)
 		}
-		subscribe.close({ unsubscribe: false })
+		void subscribe.close({ unsubscribe: false })
 		this.#subscribe.delete(msg.id)
 	}
 }
@@ -228,7 +231,7 @@ export class SubscribeRecv {
 		if (this.#state !== "init") return
 		this.#state = "ack"
 
-		console.log("got subscribe req:", this.#id, "track:", this.#trackAlias, "sending subscribe ok")
+		log.debug("sending subscribe ok", { id: this.#id, trackAlias: this.#trackAlias })
 
 		// NOTE(itzmanish): revisit this
 		// Send the control message.

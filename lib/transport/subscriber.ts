@@ -6,6 +6,9 @@ import { debug } from "./utils"
 import { ControlStream } from "./stream"
 import { SubgroupReader } from "./subgroup"
 import { ParameterType } from "./base_data"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export interface TrackInfo {
 	track_alias: bigint
@@ -129,11 +132,7 @@ export class Subscriber {
 		await this.#control.send(msg)
 	}
 
-	async subscribe(
-		namespace: string[],
-		track: string,
-		opts?: SubscribeRequestOptions,
-	) {
+	async subscribe(namespace: string[], track: string, opts?: SubscribeRequestOptions) {
 		const id = await this.#control.nextRequestId()
 
 		const subscribe = new SubscribeSend(this.#control, id, namespace, track)
@@ -151,7 +150,8 @@ export class Subscriber {
 			params.set(BigInt(ParameterType.SUBSCRIBER_PRIORITY), BigInt(opts.subscriber_priority))
 		}
 		if (opts?.group_order !== undefined) {
-			if (opts.group_order === Control.GroupOrder.Publisher) throw new Error("group_order parameter must be Ascending or Descending")
+			if (opts.group_order === Control.GroupOrder.Publisher)
+				throw new Error("group_order parameter must be Ascending or Descending")
 			params.set(BigInt(ParameterType.GROUP_ORDER), BigInt(opts.group_order))
 		}
 		if (opts?.filter !== undefined) {
@@ -178,17 +178,17 @@ export class Subscriber {
 		if (this.#trackToIDMap.has(track)) {
 			const trackID = this.#trackToIDMap.get(track)
 			if (trackID === undefined) {
-				console.warn(`Exception track ${track} not found in trackToIDMap.`)
+				log.warn(`track ${track} not found in trackToIDMap`)
 				return
 			}
 			try {
 				await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: trackID } })
 				this.#trackToIDMap.delete(track)
 			} catch (error) {
-				console.error(`Failed to unsubscribe from track ${track}:`, error)
+				log.error(`failed to unsubscribe from track ${track}`, error)
 			}
 		} else {
-			console.warn(`During unsubscribe request initiation attempt track ${track} not found in trackToIDMap.`)
+			log.warn(`unsubscribe attempted but track ${track} not found in trackToIDMap`)
 		}
 	}
 
@@ -205,10 +205,10 @@ export class Subscriber {
 		const callback = this.#pendingTrack.get(msg.track_alias)
 		if (callback) {
 			this.#pendingTrack.delete(msg.track_alias)
-			callback(msg.id)
+			void callback(msg.id)
 		}
 
-		console.log("subscribe ok", msg)
+		log.debug("subscribe ok", msg)
 		subscribe.onOk(msg.track_alias)
 	}
 
@@ -231,23 +231,23 @@ export class Subscriber {
 	}
 
 	async recvObject(reader: TrackReader | SubgroupReader) {
-		console.log("got object on recvObject", reader)
+		log.trace("recvObject", reader)
 		// Get track alias from reader header
 		const track_alias = reader.header.track_alias
 
 		// Map track alias back to subscription ID
 		const subscriptionId = this.#aliasToSubscriptionMap.get(track_alias)
-		console.log("got subscriptionId", subscriptionId)
+		log.trace("resolved subscriptionId", subscriptionId)
 		const callback = async (id: bigint) => {
 			const subscribe = this.#subscribe.get(id)
 			if (!subscribe) {
 				throw new Error(`data for unknown subscription: ${id}`)
 			}
-			console.log("doing subscribe on data", reader)
+			log.trace("dispatching data to subscription", id)
 			return subscribe.onData(reader)
 		}
 		if (subscriptionId === undefined) {
-			console.warn(`Exception track alias ${track_alias} not found in aliasToSubscriptionMap.`)
+			log.warn(`track alias ${track_alias} not found in aliasToSubscriptionMap`)
 			this.#pendingTrack.set(track_alias, callback)
 			return
 		}
@@ -322,13 +322,13 @@ export class SubscribeSend {
 	}
 
 	onOk(trackAlias: bigint) {
-		console.log("setting track alias", trackAlias)
+		log.debug("setting track alias", trackAlias)
 		this.#trackAlias = trackAlias
 	}
 
 	// FIXME(itzmanish): implement correctly
 	async onDone(code: bigint, streamCount: bigint, reason: string) {
-		console.log("subscription done", { id: this.#id, code, streamCount, reason, track: this.track })
+		log.debug("subscription done", { id: this.#id, code, streamCount, reason, track: this.track })
 
 		if (code === 0n) {
 			return await this.#data.close()
@@ -352,7 +352,7 @@ export class SubscribeSend {
 	}
 
 	async onData(reader: TrackReader | SubgroupReader) {
-		console.log("subscribe send onData", reader)
+		log.trace("onData", reader)
 		if (!this.#data.closed()) await this.#data.push(reader)
 	}
 

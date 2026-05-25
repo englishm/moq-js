@@ -9,6 +9,9 @@ import { asError } from "../../common/error"
 import { Deferred } from "../../common/async"
 import { SubgroupReader } from "../../transport/subgroup"
 import { ReadableStreamBuffer } from "../../transport/buffer"
+import { getWorkerLogger, setWorkerLogLevel } from "../../common/logger"
+
+const log = getWorkerLogger()
 
 class Worker {
 	// Timeline receives samples, buffering them and choosing the timestamp to render.
@@ -23,15 +26,17 @@ class Worker {
 
 	on(e: MessageEvent) {
 		const msg = e.data as Message.ToWorker
-		// console.log("message: ", msg)
 
-		if (msg.config) {
+		if (msg.logLevel !== undefined) {
+			// Update the module-level worker log level so all worker loggers re-read it.
+			setWorkerLogLevel(msg.logLevel)
+		} else if (msg.config) {
 			this.#onConfig(msg.config)
 		} else if (msg.init) {
-			// TODO buffer the init segmnet so we don't hold the stream open.
+			// TODO buffer the init segment so we don't hold the stream open.
 			this.#onInit(msg.init)
 		} else if (msg.segment) {
-			this.#onSegment(msg.segment).catch(console.warn)
+			this.#onSegment(msg.segment).catch((e) => log.warn("onSegment failed", e))
 		} else if (msg.play === false) {
 			this.#onPause(msg.play)
 		} else if (msg.play === true) {
@@ -107,7 +112,7 @@ class Worker {
 
 			if (msg.kind === "video" && !firstVideoFrameLogged && frames.length > 0) {
 				const first = frames[0]
-				console.log("[PlaybackWorker] video segment first frame", {
+				log.debug("video segment first frame", {
 					groupId: msg.header.group_id,
 					subgroupId: msg.header.subgroup_id,
 					objectId: chunk.object_id,
@@ -120,7 +125,7 @@ class Worker {
 				})
 
 				if (!first.sample.is_sync) {
-					console.warn("[PlaybackWorker] video segment starts without a keyframe", {
+					log.warn("video segment starts without a keyframe", {
 						groupId: msg.header.group_id,
 						subgroupId: msg.header.subgroup_id,
 						objectId: chunk.object_id,
@@ -145,9 +150,9 @@ class Worker {
 			}
 
 			if (!firstVideoFrameLogged) {
-				console.warn("[PlaybackWorker] video segment produced no frames", details)
+				log.warn("video segment produced no frames", details)
 			} else {
-				console.log("[PlaybackWorker] video segment complete", details)
+				log.debug("video segment complete", details)
 			}
 		}
 
@@ -175,7 +180,7 @@ self.addEventListener("message", (msg) => {
 		worker.on(msg)
 	} catch (e) {
 		const err = asError(e)
-		console.warn("worker error:", err)
+		log.warn("worker error:", err)
 	}
 })
 

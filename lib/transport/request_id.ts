@@ -2,6 +2,9 @@ import { Parameters } from "./base_data"
 import { MaxRequestId } from "./control/max_request_id"
 import { RequestsBlocked } from "./control/requests_blocked"
 import { SetupParameters } from "./control/setup_parameters"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export type RequestIdAllocation =
 	| { type: "allocated"; id: bigint }
@@ -64,7 +67,7 @@ export class RequestId {
 	}
 
 	handleRequestsBlocked(msg: RequestsBlocked) {
-		console.warn("got requests blocked", {
+		log.warn("requests blocked", {
 			maxRequestId: msg.maximum_request_id,
 			advertisedMaxRequestId: this.#ourMax,
 			limitHit: msg.maximum_request_id === this.#ourMax,

@@ -6,6 +6,9 @@ import { BroadcastConfig } from "./broadcast"
 
 import * as Audio from "./audio"
 import * as Video from "./video"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export class Track {
 	name: string
@@ -50,7 +53,7 @@ export class Track {
 			.pipeThrough(container.encode)
 			.pipeTo(segments)
 			.catch((err) => {
-				console.error("Audio pipeline error:", err)
+				log.error("audio pipeline error", err)
 				throw err
 			})
 	}
@@ -108,7 +111,7 @@ export class Track {
 		if ((writer.desiredSize || 0) > 0) {
 			await writer.write(chunk)
 		} else {
-			console.warn("dropping chunk", writer.desiredSize)
+			log.warn("dropping chunk", writer.desiredSize)
 		}
 
 		writer.releaseLock()

@@ -1,7 +1,7 @@
-import { SubgroupHeader, SubgroupObject, SubgroupReader, SubgroupType, SubgroupWriter } from "./subgroup"
+import { SubgroupHeader, SubgroupReader, SubgroupType, SubgroupWriter } from "./subgroup"
 import { ExtensionHeaders, KeyValuePairs } from "./base_data"
 import { Status } from "./object_status"
-import { debug } from "./utils"
+import { getLogger } from "../common/logger"
 import {
 	ImmutableBytesBuffer,
 	MutableBytesBuffer,
@@ -12,6 +12,8 @@ import {
 } from "./buffer"
 
 export { Status } from "./object_status"
+
+const log = getLogger()
 
 export enum ObjectForwardingPreference {
 	Datagram = "Datagram",
@@ -154,7 +156,12 @@ export namespace ObjectDatagram {
 		const hasExtensions = ObjectDatagramType.hasExtensions(obj.type)
 		if (hasExtensions) {
 			const extensionHeaders = obj.extension_headers ?? new Map()
-			if (ObjectDatagramType.hasStatus(obj.type) && obj.status !== undefined && obj.status !== Status.NORMAL && extensionHeaders.size > 0) {
+			if (
+				ObjectDatagramType.hasStatus(obj.type) &&
+				obj.status !== undefined &&
+				obj.status !== Status.NORMAL &&
+				extensionHeaders.size > 0
+			) {
 				throw new Error("non-normal object status cannot include extensions")
 			}
 			buf.putBytes(ExtensionHeaders.serialize(extensionHeaders, false))
@@ -240,12 +247,11 @@ export class Objects {
 	}
 
 	async recv(): Promise<TrackReader | SubgroupReader | undefined> {
-		console.log("Objects.recv waiting for streams")
+		log.trace("waiting for incoming streams")
 		const streams = this.quic.incomingUnidirectionalStreams.getReader()
 
-		console.log("Objects.recv got streams", streams)
 		const { value, done } = await streams.read()
-		console.log("Objects.recv got value, done", value, done)
+		log.trace("got stream", { done })
 		streams.releaseLock()
 
 		if (done) return
@@ -256,7 +262,7 @@ export class Objects {
 		// Try to parse as SubgroupType
 		try {
 			const subgroupType = SubgroupType.try_from(type)
-			console.log("Objects.recv got type", subgroupType)
+			log.trace("parsed stream type", subgroupType)
 
 			const track_alias = await r.getVarInt()
 			const group_id = await r.getNumberVarInt()
@@ -284,12 +290,12 @@ export class Objects {
 				publisher_priority,
 			}
 
-			console.log("Objects.recv got subgroup header", h)
+			log.trace("parsed subgroup header", h)
 
 			return new SubgroupReader(h, r)
 		} catch (e) {
 			// Not a subgroup type, might be datagram or other type
-			console.log("transport/objects.ts: unknown stream type: ", type)
+			log.warn("unknown stream type", type)
 			throw new Error(`unknown stream type: ${type}`)
 		}
 	}

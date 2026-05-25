@@ -1,22 +1,28 @@
 // TODO add support for @/ to avoid relative imports
 import { Ring } from "../../common/ring"
 import * as Message from "./message"
+import { getWorkletLogger, setWorkletLogLevel } from "../../common/logger"
 
 class Renderer extends AudioWorkletProcessor {
 	ring?: Ring
 	base: number
+	// log is initialised in the constructor once `this.port` is available.
+	#log!: ReturnType<typeof getWorkletLogger>
 
 	constructor() {
 		// The super constructor call is required.
 		super()
 
 		this.base = 0
+		this.#log = getWorkletLogger(this.port)
 		this.port.onmessage = this.onMessage.bind(this)
 	}
 
 	onMessage(e: MessageEvent) {
 		const msg = e.data as Message.From
-		if (msg.config) {
+		if (msg.logLevel !== undefined) {
+			setWorkletLogLevel(msg.logLevel)
+		} else if (msg.config) {
 			this.onConfig(msg.config)
 		}
 	}
@@ -39,22 +45,17 @@ class Renderer extends AudioWorkletProcessor {
 		if (this.ring.size() == this.ring.capacity) {
 			// This is a hack to clear any latency in the ring buffer.
 			// The proper solution is to play back slightly faster?
-			console.warn("resyncing ring buffer")
+			this.#log.warn("resyncing ring buffer")
 			this.ring.clear()
 			return true
 		}
 
 		const output = outputs[0]
-		if (!output?.length) {
-			return true
-		}
 
 		const size = this.ring.read(output)
-		if (size < output[0].length) {
-			console.warn("audio underrun", {
-				requestedFrames: output[0].length,
-				readFrames: size,
-			})
+		if (size < output.length) {
+			this.#log.warn("audio underrun", { expected: output.length, got: size })
+			// TODO trigger rebuffering event
 		}
 
 		return true

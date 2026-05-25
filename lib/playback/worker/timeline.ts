@@ -1,5 +1,8 @@
 import type { Frame } from "../../media/mp4"
 export type { Frame }
+import { getWorkerLogger } from "../../common/logger"
+
+const log = getWorkerLogger()
 
 export interface Range {
 	start: number
@@ -83,7 +86,7 @@ export class Component {
 			if (this.#current) {
 				if (value.sequence < this.#current.sequence) {
 					// Our segment is older than the current, abandon it.
-					console.warn("[Timeline] dropping stale segment", {
+					log.warn("dropping stale segment", {
 						currentSequence: this.#current.sequence,
 						nextSequence: value.sequence,
 					})
@@ -91,7 +94,7 @@ export class Component {
 					continue
 				} else {
 					// Our segment is newer than the current, cancel the old one.
-					console.warn("[Timeline] dropping slow segment", {
+					log.warn("dropping slow segment", {
 						currentSequence: this.#current.sequence,
 						nextSequence: value.sequence,
 					})
