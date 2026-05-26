@@ -29,8 +29,15 @@ export class Broadcast {
 	readonly namespace: string[]
 
 	#running: Promise<void>
+	// Resolves to break out of the #run() subscribed() loop on close().
+	#closed = false
+	#closeResolve?: () => void
+	#closePromise: Promise<void>
 
 	constructor(config: BroadcastConfig) {
+		this.#closePromise = new Promise<void>((resolve) => {
+			this.#closeResolve = resolve
+		})
 		this.connection = config.connection
 		this.config = config
 		this.namespace = config.namespace
@@ -121,8 +128,15 @@ export class Broadcast {
 		await this.connection.publish_namespace(this.namespace)
 
 		for (;;) {
-			const subscriber = await this.connection.subscribed()
-			if (!subscriber) break
+			// Race the next subscriber against the close signal.
+			const result = await Promise.race([
+				this.connection.subscribed().then((s) => ({ kind: "subscriber" as const, value: s })),
+				this.#closePromise.then(() => ({ kind: "closed" as const, value: undefined })),
+			])
+
+			if (result.kind === "closed" || !result.value) break
+
+			const subscriber = result.value
 
 			// Run an async task to serve each subscription.
 			this.#serveSubscribe(subscriber).catch((e) => {
@@ -241,7 +255,14 @@ export class Broadcast {
 	}
 
 	close() {
-		// TODO implement publish close
+		if (this.#closed) return
+		this.#closed = true
+		this.#closeResolve?.()
+		// Stop all encoder pipelines by stopping the underlying MediaStreamTracks.
+		for (const track of this.config.media.getTracks()) {
+			track.stop()
+		}
+		log.debug("broadcast closed")
 	}
 
 	// Returns the error message when the connection is closed

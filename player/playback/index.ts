@@ -47,6 +47,7 @@ export default class Player extends EventTarget {
 	#abort!: (err: Error) => void
 	#ready: Promise<void>
 	#trackTasks: Map<string, Promise<void>> = new Map()
+	#timeUpdateInterval?: ReturnType<typeof setInterval>
 
 	private constructor(connection: Connection, catalog: Catalog.Root, tracknum: number, canvas: OffscreenCanvas) {
 		super()
@@ -113,8 +114,6 @@ export default class Player extends EventTarget {
 		// Call #runInit on each unique init track (deduplicated by namespace+name key)
 		// TODO do this in parallel with #runTrack to remove a round trip
 		await Promise.all(Array.from(inits.values()).map((init) => this.#runInit(...init)))
-
-		this.#startEmittingTimeUpdate()
 	}
 
 	async #runInit(namespace: string, name: string) {
@@ -222,9 +221,17 @@ export default class Player extends EventTarget {
 	}
 
 	#startEmittingTimeUpdate() {
-		setInterval(() => {
+		this.#stopEmittingTimeUpdate()
+		this.#timeUpdateInterval = setInterval(() => {
 			this.dispatchEvent(new Event("timeupdate"))
 		}, 1000) // Emit timeupdate every second
+	}
+
+	#stopEmittingTimeUpdate() {
+		if (this.#timeUpdateInterval !== undefined) {
+			clearInterval(this.#timeUpdateInterval)
+			this.#timeUpdateInterval = undefined
+		}
 	}
 
 	getCatalog() {
@@ -333,8 +340,15 @@ export default class Player extends EventTarget {
 		if (err) this.#abort(err)
 		else this.#close()
 
-		if (this.#connection) this.#connection.close()
+		this.#stopEmittingTimeUpdate()
+
+		// Wait for all in-flight track subscriptions to settle before closing transport.
+		if (this.#trackTasks.size > 0) {
+			await Promise.allSettled(this.#trackTasks.values())
+		}
+
 		if (this.#backend) await this.#backend.close()
+		if (this.#connection) this.#connection.close()
 	}
 
 	async closed(): Promise<Error | undefined> {
@@ -377,6 +391,7 @@ export default class Player extends EventTarget {
 				await this.#backend.unmute()
 			}
 			this.#backend.play()
+			this.#startEmittingTimeUpdate()
 			super.dispatchEvent(new CustomEvent("play", { detail: { track: this.#videoTrackName } }))
 		}
 	}
@@ -394,6 +409,7 @@ export default class Player extends EventTarget {
 			log.debug("dispatching pause event")
 
 			this.#backend.pause()
+			this.#stopEmittingTimeUpdate()
 			await Promise.all([mutePromise, audioPromise, videoPromise])
 		}
 	}

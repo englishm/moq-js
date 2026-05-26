@@ -28,15 +28,20 @@ export default class Backend {
 
 	// Dispose function for the logger level change listener
 	#disposeLoggerListener: () => void
+	// Dispose function for the worker log receiver listener
+	#disposeWorkerLogReceiver: () => void
+	// Bound message handler stored so the same reference is used for add/remove.
+	#onMessage: (e: MessageEvent) => void
 
 	constructor(config: PlayerConfig, eventTarget: EventTarget) {
 		// TODO does this block the main thread? If so, make this async
 		this.#worker = new MediaWorker()
-		this.#worker.addEventListener("message", this.#on.bind(this))
+		this.#onMessage = this.#on.bind(this)
+		this.#worker.addEventListener("message", this.#onMessage)
 		this.#eventTarget = eventTarget
 
 		// Install log receiver so worker log records appear in the global logger.
-		installWorkerLogReceiver(this.#worker)
+		this.#disposeWorkerLogReceiver = installWorkerLogReceiver(this.#worker)
 
 		// Keep the worker's cached log level in sync whenever the global logger changes.
 		this.#disposeLoggerListener = onLoggerLevelChange((level) => {
@@ -119,6 +124,8 @@ export default class Backend {
 
 	async close() {
 		this.#disposeLoggerListener()
+		this.#disposeWorkerLogReceiver()
+		this.#worker.removeEventListener("message", this.#onMessage)
 		this.#worker.terminate()
 		await this.#audio?.context.close()
 	}

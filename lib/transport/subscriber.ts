@@ -32,6 +32,8 @@ export class Subscriber {
 	// Announced broadcasts.
 	#publishedNamespaces = new Map<string, PublishNamespaceRecv>()
 	#publishedNamespacesQueue = new Watch<PublishNamespaceRecv[]>([])
+	// Maps the original PublishNamespace request ID to the namespace key for cleanup.
+	#publishedNamespaceIdMap = new Map<bigint, string>()
 
 	// Our subscribed tracks.
 	#subscribe = new Map<bigint, SubscribeSend>()
@@ -110,12 +112,26 @@ export class Subscriber {
 
 		const publishNamespace = new PublishNamespaceRecv(this.#control, msg.namespace, msg.id)
 		this.#publishedNamespaces.set(msg.namespace.join("/"), publishNamespace)
+		this.#publishedNamespaceIdMap.set(msg.id, msg.namespace.join("/"))
 
 		this.#publishedNamespacesQueue.update((queue) => [...queue, publishNamespace])
 	}
 
-	recvPublishNamespaceDone(_msg: Control.PublishNamespaceDone) {
-		throw new Error(`TODO PublishNamespaceDone`)
+	recvPublishNamespaceDone(msg: Control.PublishNamespaceDone) {
+		const key = this.#publishedNamespaceIdMap.get(msg.id)
+		if (key === undefined) {
+			log.warn(`PUBLISH_NAMESPACE_DONE for unknown request id: ${msg.id}`)
+			return
+		}
+		this.#publishedNamespaceIdMap.delete(msg.id)
+		const ns = this.#publishedNamespaces.get(key)
+		if (!ns) {
+			log.warn(`PUBLISH_NAMESPACE_DONE for unknown namespace: ${key}`)
+			return
+		}
+		this.#publishedNamespaces.delete(key)
+		this.#publishedNamespacesQueue.update((queue) => queue.filter((n) => n !== ns))
+		log.debug("publish namespace done", key)
 	}
 
 	async subscribe_namespace(namespace: string[]) {
@@ -175,20 +191,19 @@ export class Subscriber {
 	}
 
 	async unsubscribe(track: string) {
-		if (this.#trackToIDMap.has(track)) {
-			const trackID = this.#trackToIDMap.get(track)
-			if (trackID === undefined) {
-				log.warn(`track ${track} not found in trackToIDMap`)
-				return
-			}
-			try {
-				await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: trackID } })
-				this.#trackToIDMap.delete(track)
-			} catch (error) {
-				log.error(`failed to unsubscribe from track ${track}`, error)
-			}
-		} else {
+		const trackID = this.#trackToIDMap.get(track)
+		if (trackID === undefined) {
 			log.warn(`unsubscribe attempted but track ${track} not found in trackToIDMap`)
+			return
+		}
+
+		// Clean up all maps eagerly so no new data is routed after this point.
+		this.#dropSubscribe(trackID)
+
+		try {
+			await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: trackID } })
+		} catch (error) {
+			log.error(`failed to send UNSUBSCRIBE for track ${track}`, error)
 		}
 	}
 
@@ -317,8 +332,15 @@ export class SubscribeSend {
 	}
 
 	async close(_code = 0n, _reason = "") {
-		// TODO implement unsubscribe
-		// await this.#inner.sendReset(code, reason)
+		if (this.#data.closed()) return
+
+		try {
+			await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: this.#id } })
+		} catch (e) {
+			log.warn("failed to send UNSUBSCRIBE on close", e)
+		}
+
+		await this.#data.close()
 	}
 
 	onOk(trackAlias: bigint) {

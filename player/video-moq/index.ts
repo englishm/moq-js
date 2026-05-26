@@ -15,7 +15,7 @@ import STYLE_SHEET from "./video-moq.css"
 export class VideoMoq extends HTMLElement {
 	private shadow: ShadowRoot
 
-	// Event Handlers
+	// Event Handlers — stored as instance fields so add/remove use identical references.
 	private playPauseEventHandler: (event: Event) => void
 	private onMouseEnterHandler: (event: Event) => void
 	private onMouseLeaveHandler: (event: Event) => void
@@ -24,6 +24,13 @@ export class VideoMoq extends HTMLElement {
 	private toggleShowTrackEventHandler: (event: Event) => void
 	private toggleFullscreenEventHandler: (event: Event) => void
 	private togglePictureInPictureEventHandler: (event: Event) => void
+	// Document-level handlers that must be removed on destroy.
+	private keydownHandler: (event: KeyboardEvent) => void
+	private fullscreenChangeHandler: () => void
+	// PiP window handlers stored so the same reference is removed on exit.
+	#pipPagehideHandler: () => void
+	// Guard: a pending destroy() promise so connectedCallback waits for it.
+	#destroying: Promise<void> | null = null
 
 	// HTML Elements
 	#base?: HTMLDivElement
@@ -150,6 +157,13 @@ export class VideoMoq extends HTMLElement {
 		this.toggleShowTrackEventHandler = this.toggleShowTracks.bind(this)
 		this.toggleFullscreenEventHandler = this.toggleFullscreen.bind(this)
 		this.onFullscreenChange = this.onFullscreenChange.bind(this)
+		this.keydownHandler = (e: KeyboardEvent) => {
+			if (e.key === "f") {
+				this.toggleFullscreenEventHandler(e)
+			}
+		}
+		this.fullscreenChangeHandler = () => this.onFullscreenChange()
+		this.#pipPagehideHandler = () => this.exitPictureInPicture()
 	}
 
 	/**
@@ -161,16 +175,28 @@ export class VideoMoq extends HTMLElement {
 	 * @returns
 	 */
 	connectedCallback() {
-		this.load()
+		// If a destroy() is in flight (e.g. rapid disconnect/reconnect), wait for it
+		// before starting a new load so the old connection is fully closed first.
+		if (this.#destroying) {
+			this.#destroying.then(() => this.load()).catch((error) => {
+				log.error("Error during deferred load after destroy:", error)
+			})
+		} else {
+			this.load()
+		}
 	}
 
 	/**
 	 * Called when the element is removed from the DOM
 	 * */
 	disconnectedCallback() {
-		this.destroy().catch((error) => {
-			log.error("Error while destroying:", error)
-		})
+		this.#destroying = this.destroy()
+			.catch((error) => {
+				log.error("Error while destroying:", error)
+			})
+			.finally(() => {
+				this.#destroying = null
+			})
 	}
 
 	// Called when one of the element's watched attributes change. For an attribute to be watched, you must add it to the component class's static observedAttributes property.
@@ -303,12 +329,8 @@ export class VideoMoq extends HTMLElement {
 			this.#fullscreenButton.addEventListener("click", this.toggleFullscreenEventHandler)
 			this.#pipButton.addEventListener("click", this.togglePictureInPictureEventHandler)
 
-			document.addEventListener("keydown", (e) => {
-				if (e.key === "f") {
-					this.toggleFullscreenEventHandler(e)
-				}
-			})
-			document.addEventListener("fullscreenchange", () => this.onFullscreenChange())
+			document.addEventListener("keydown", this.keydownHandler)
+			document.addEventListener("fullscreenchange", this.fullscreenChangeHandler)
 		}
 
 		const width = this.parseDimension(this.getAttribute("width"), -1)
@@ -342,8 +364,8 @@ export class VideoMoq extends HTMLElement {
 		this.#fullscreenButton?.removeEventListener("click", this.toggleFullscreenEventHandler)
 		this.#pipButton?.removeEventListener("click", this.togglePictureInPictureEventHandler)
 
-		document.removeEventListener("keydown", this.toggleFullscreenEventHandler)
-		document.removeEventListener("fullscreenchange", () => this.onFullscreenChange())
+		document.removeEventListener("keydown", this.keydownHandler)
+		document.removeEventListener("fullscreenchange", this.fullscreenChangeHandler)
 
 		if (!this.player) return
 		await this.player.close()
@@ -542,7 +564,7 @@ export class VideoMoq extends HTMLElement {
 		this.#base.appendChild(pipText)
 
 		this.#canvas.addEventListener("click", this.playPauseEventHandler)
-		this.#pipWindow?.addEventListener("pagehide", () => this.exitPictureInPicture())
+		this.#pipWindow?.addEventListener("pagehide", this.#pipPagehideHandler)
 	}
 
 	private exitPictureInPicture() {
@@ -564,7 +586,7 @@ export class VideoMoq extends HTMLElement {
 			}
 
 			this.#canvas.removeEventListener("click", this.playPauseEventHandler)
-			this.#pipWindow?.removeEventListener("pagehide", () => this.exitPictureInPicture())
+			this.#pipWindow?.removeEventListener("pagehide", this.#pipPagehideHandler)
 			this.#pipWindow?.close()
 			this.#pipWindow = undefined
 		} else {

@@ -46,8 +46,12 @@ export class RequestId {
 	}
 
 	applyMaxRequestId(msg: MaxRequestId) {
-		if (msg.max_request_id <= this.#peerMax) {
-			throw new Error("MAX_REQUEST_ID must be strictly increasing")
+		if (msg.max_request_id < this.#peerMax) {
+			throw new Error("MAX_REQUEST_ID must not decrease")
+		}
+		if (msg.max_request_id === this.#peerMax) {
+			// Re-advertising the same value is a no-op per spec.
+			return
 		}
 
 		this.#peerMax = msg.max_request_id

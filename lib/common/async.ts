@@ -52,8 +52,9 @@ export class Watch<T> {
 	}
 
 	close() {
-		this.#current[1] = undefined
-		this.#next.resolve(this.#current)
+		const closed: WatchNext<T> = [this.#current[0], undefined]
+		this.#current = closed
+		this.#next.resolve(closed)
 	}
 }
 

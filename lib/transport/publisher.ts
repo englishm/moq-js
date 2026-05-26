@@ -92,7 +92,7 @@ export class Publisher {
 		}
 
 		this.#pendingPublishNamespaceRequests.delete(msg.id)
-		publishNamespaceSend.onOk()
+		publishNamespaceSend.onOk(msg.id)
 		log.debug("published namespace", namespace)
 	}
 
@@ -148,6 +148,8 @@ export class Publisher {
 
 export class PublishNamespaceSend {
 	#control: ControlStream
+	// The request ID assigned when PublishNamespace was sent; set by onOk().
+	#id?: bigint
 
 	readonly namespace: string[]
 
@@ -181,8 +183,19 @@ export class PublishNamespaceSend {
 	}
 
 	async close() {
-		// TODO implement unsubscribe
-		// await this.#inner.sendUnsubscribe()
+		if (this.closed()) return
+		this.#state.close()
+
+		if (this.#id !== undefined) {
+			try {
+				await this.#control.send({
+					type: Control.ControlMessageType.PublishNamespaceDone,
+					message: { id: this.#id },
+				})
+			} catch (e) {
+				log.warn("failed to send PUBLISH_NAMESPACE_DONE on close", e)
+			}
+		}
 	}
 
 	closed() {
@@ -190,8 +203,9 @@ export class PublishNamespaceSend {
 		return state instanceof Error || next == undefined
 	}
 
-	onOk() {
+	onOk(id: bigint) {
 		if (this.closed()) return
+		this.#id = id
 		this.#state.update("ack")
 	}
 
