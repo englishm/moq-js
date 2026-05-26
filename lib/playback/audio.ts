@@ -1,12 +1,18 @@
 import * as Message from "./worker/message"
 
 import registerMyAudioWorklet from "audio-worklet:./worklet/index.ts"
+import { getLogger, getGlobalLogger, installWorkletLogReceiver, onLoggerLevelChange } from "../common/logger"
+
+const log = getLogger()
 
 // NOTE: This must be on the main thread
 export class Audio {
 	context: AudioContext
 	worklet: Promise<AudioWorkletNode>
 	volumeNode: GainNode
+
+	// Dispose function for the logger level change listener
+	#disposeLoggerListener?: () => void
 
 	constructor(config: Message.ConfigAudio) {
 		this.context = new AudioContext({
@@ -28,16 +34,29 @@ export class Audio {
 		// Create the worklet
 		const worklet = new AudioWorkletNode(this.context, "renderer")
 
-		worklet.port.addEventListener("message", this.on.bind(this))
 		worklet.onprocessorerror = (e: Event) => {
-			console.error("Audio worklet error:", e)
+			log.error("audio worklet processor error", e)
 		}
+
+		// Install log receiver so worklet log records appear in the global logger.
+		worklet.port.start()
+		installWorkletLogReceiver(worklet.port)
+
+		// Keep the worklet's cached log level in sync whenever the global logger changes.
+		this.#disposeLoggerListener = onLoggerLevelChange((level) => {
+			worklet.port.postMessage({ logLevel: level })
+		})
 
 		// Connect the worklet to the volume node and then to the speakers
 		worklet.connect(this.volumeNode)
 		this.volumeNode.connect(this.context.destination)
 
 		worklet.port.postMessage({ config })
+
+		// Send the initial log level to the worklet.
+		const logger = getGlobalLogger()
+		const initialLevel = typeof logger.level === "function" ? logger.level() : "error"
+		worklet.port.postMessage({ logLevel: initialLevel })
 
 		return worklet
 	}
@@ -52,5 +71,14 @@ export class Audio {
 
 	public getVolume(): number {
 		return this.volumeNode.gain.value
+	}
+
+	async close() {
+		this.#disposeLoggerListener?.()
+		const worklet = await this.worklet.catch(() => undefined)
+		if (worklet) {
+			worklet.port.close()
+			worklet.disconnect()
+		}
 	}
 }

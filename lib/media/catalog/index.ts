@@ -1,6 +1,9 @@
 import { Connection } from "../../transport"
 import { asError } from "../../common/error"
 import { debug } from "../../transport/utils"
+import { getLogger } from "../../common/logger"
+
+const log = getLogger()
 
 export interface CommonTrackFields {
 	namespace?: string[]
@@ -50,15 +53,15 @@ export function decode(raw: Uint8Array): Root {
 export async function fetch(connection: Connection, namespace: string[]) {
 	const subscribe = await connection.subscribe(namespace, ".catalog")
 	try {
-		debug("catalog subscribe", subscribe)
+		debug("catalog subscribe request sent; waiting for catalog data")
 		const segment = await subscribe.data()
 		if (!segment) throw new Error("no catalog data")
 
-		console.log("catalog segment", segment)
+		log.debug("catalog segment", segment)
 		const chunk = await segment.read()
 		if (!chunk) throw new Error("no catalog chunk")
 
-		console.log("catalog chunk", chunk)
+		log.debug("catalog chunk", chunk)
 		await segment.close()
 		await subscribe.close() // we done
 
@@ -68,7 +71,7 @@ export async function fetch(connection: Connection, namespace: string[]) {
 			throw new Error("invalid catalog chunk")
 		}
 	} catch (e) {
-		console.error("Catalog fetch error: ", e)
+		log.error("catalog fetch error", e)
 		const err = asError(e)
 
 		// // Close the subscription after we're done.

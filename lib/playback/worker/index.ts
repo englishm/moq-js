@@ -9,6 +9,9 @@ import { asError } from "../../common/error"
 import { Deferred } from "../../common/async"
 import { SubgroupReader } from "../../transport/subgroup"
 import { ReadableStreamBuffer } from "../../transport/buffer"
+import { getWorkerLogger, setWorkerLogLevel } from "../../common/logger"
+
+const log = getWorkerLogger()
 
 class Worker {
 	// Timeline receives samples, buffering them and choosing the timestamp to render.
@@ -23,15 +26,17 @@ class Worker {
 
 	on(e: MessageEvent) {
 		const msg = e.data as Message.ToWorker
-		// console.log("message: ", msg)
 
-		if (msg.config) {
+		if (msg.logLevel !== undefined) {
+			// Update the module-level worker log level so all worker loggers re-read it.
+			setWorkerLogLevel(msg.logLevel)
+		} else if (msg.config) {
 			this.#onConfig(msg.config)
 		} else if (msg.init) {
-			// TODO buffer the init segmnet so we don't hold the stream open.
+			// TODO buffer the init segment so we don't hold the stream open.
 			this.#onInit(msg.init)
 		} else if (msg.segment) {
-			this.#onSegment(msg.segment).catch(console.warn)
+			this.#onSegment(msg.segment).catch((e) => log.warn("onSegment failed", e))
 		} else if (msg.play === false) {
 			this.#onPause(msg.play)
 		} else if (msg.play === true) {
@@ -77,6 +82,9 @@ class Worker {
 		// Create a queue that will contain each MP4 frame.
 		const queue = new TransformStream<MP4.Frame>({})
 		const segment = queue.writable.getWriter()
+		let objectCount = 0
+		let frameCount = 0
+		let firstVideoFrameLogged = false
 
 		// Add the segment to the timeline
 		const segments = timeline.segments.getWriter()
@@ -87,19 +95,64 @@ class Worker {
 		segments.releaseLock()
 
 		// Read each chunk, decoding the MP4 frames and adding them to the queue.
-		for (; ;) {
+		for (;;) {
 			const chunk = await reader.read()
 			if (!chunk) {
 				break
 			}
+
+			objectCount += 1
 
 			if (!(chunk.object_payload instanceof Uint8Array)) {
 				throw new Error(`invalid payload: ${chunk.object_payload}`)
 			}
 
 			const frames = container.decode(chunk.object_payload)
+			frameCount += frames.length
+
+			if (msg.kind === "video" && !firstVideoFrameLogged && frames.length > 0) {
+				const first = frames[0]
+				log.debug("video segment first frame", {
+					groupId: msg.header.group_id,
+					subgroupId: msg.header.subgroup_id,
+					objectId: chunk.object_id,
+					codec: first.track.codec,
+					isSync: first.sample.is_sync,
+					cts: first.sample.cts,
+					dts: first.sample.dts,
+					duration: first.sample.duration,
+					framesFromObject: frames.length,
+				})
+
+				if (!first.sample.is_sync) {
+					log.warn("video segment starts without a keyframe", {
+						groupId: msg.header.group_id,
+						subgroupId: msg.header.subgroup_id,
+						objectId: chunk.object_id,
+					})
+				}
+
+				firstVideoFrameLogged = true
+			}
+
 			for (const frame of frames) {
 				await segment.write(frame)
+			}
+		}
+
+		if (msg.kind === "video") {
+			const details = {
+				groupId: msg.header.group_id,
+				subgroupId: msg.header.subgroup_id,
+				objectCount,
+				frameCount,
+				firstFrameLogged: firstVideoFrameLogged,
+			}
+
+			if (!firstVideoFrameLogged) {
+				log.warn("video segment produced no frames", details)
+			} else {
+				log.debug("video segment complete", details)
 			}
 		}
 
@@ -127,7 +180,7 @@ self.addEventListener("message", (msg) => {
 		worker.on(msg)
 	} catch (e) {
 		const err = asError(e)
-		console.warn("worker error:", err)
+		log.warn("worker error:", err)
 	}
 })
 

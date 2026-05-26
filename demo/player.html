@@ -104,6 +104,7 @@
 				constructor() {
 					console.log("MoQTPlayerDemo constructor");
 					this.namespace = null;
+					this.relayUrl = null;
 					this.isConnected = false;
 					this.videoPlayer = null;
 					this.startTime = Date.now();
@@ -200,6 +201,7 @@
 				parseUrlParameters() {
 					const urlParams = new URLSearchParams(window.location.search);
 					this.namespace = urlParams.get("namespace");
+					this.relayUrl = urlParams.get("relay") || window.MoQConfig.getRelayUrl();
 
 					if (!this.namespace) {
 						this.showError("No stream namespace provided in URL. Please use a valid player link.");
@@ -211,7 +213,7 @@
 
 				updateConfigDisplay() {
 					this.streamNamespace.textContent = this.namespace || "Not specified";
-					this.streamRelay.textContent = window.MoQConfig.getRelayUrl();
+					this.streamRelay.textContent = this.relayUrl;
 				}
 
 				async initializePlayer() {
@@ -233,7 +235,7 @@
 						this.videoPlayer.setAttribute("muted", "");
 
 						// Configure the video player element with full URL
-						const srcUrl = `${window.MoQConfig.getRelayUrl()}?namespace=${this.namespace}`;
+						const srcUrl = `${this.relayUrl}?namespace=${this.namespace}`;
 						this.videoPlayer.setAttribute("src", srcUrl);
 						console.log("MoQTPlayerDemo initializePlayer srcUrl", srcUrl);
 

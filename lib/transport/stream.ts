@@ -1,28 +1,47 @@
-
 import {
-	ControlMessageType, FetchError,
-	MessageWithType, Publish,
-	PublishDone, PublishError, PublishNamespace,
-	PublishNamespaceDone, PublishNamespaceError,
-	PublishNamespaceOk, PublishOk, Unsubscribe,
-	Fetch, FetchOk, FetchCancel,
-	Subscribe, SubscribeOk, SubscribeError,
-	SubscribeUpdate, SubscribeNamespace,
-	SubscribeNamespaceOk, SubscribeNamespaceError,
+	ControlMessageType,
+	MessageWithType,
+	Publish,
+	PublishDone,
+	PublishNamespace,
+	PublishNamespaceDone,
+	PublishNamespaceCancel,
+	PublishOk,
+	Unsubscribe,
+	Fetch,
+	FetchOk,
+	FetchCancel,
+	Subscribe,
+	SubscribeOk,
+	SubscribeUpdate,
+	SubscribeNamespace,
+	Namespace,
+	NamespaceDone,
+	TrackStatus,
+	MaxRequestId,
+	RequestsBlocked,
+	RequestOk,
+	RequestError,
+	GoAway,
 } from "./control"
 import { debug } from "./utils"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } from "./buffer"
+import { RequestId } from "./request_id"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export class ControlStream {
 	private decoder: Decoder
 	private encoder: Encoder
-	#nextRequestId = 0n
+	#requestId: RequestId
 
 	#mutex = Promise.resolve()
 
-	constructor(c: ReadableWritableStreamBuffer) {
+	constructor(c: ReadableWritableStreamBuffer, requestId = RequestId.client(0n, 0n)) {
 		this.decoder = new Decoder(c)
 		this.encoder = new Encoder(c)
+		this.#requestId = requestId
 	}
 
 	// Will error if two messages are read at once.
@@ -60,10 +79,32 @@ export class ControlStream {
 		return lock
 	}
 
-	nextRequestId(incr: bigint = 2n): bigint {
-		const id = this.#nextRequestId
-		this.#nextRequestId += incr
-		return id
+	async nextRequestId(): Promise<bigint> {
+		const allocation = this.#requestId.allocate()
+		if (allocation.type === "allocated") {
+			return allocation.id
+		}
+
+		if (allocation.should_send_requests_blocked) {
+			await this.send({
+				type: ControlMessageType.RequestsBlocked,
+				message: { maximum_request_id: allocation.max_request_id },
+			})
+		}
+
+		throw new Error("request ID limit reached")
+	}
+
+	applyMaxRequestId(msg: MaxRequestId) {
+		this.#requestId.applyMaxRequestId(msg)
+	}
+
+	validateIncomingRequestId(id: bigint) {
+		this.#requestId.validateIncoming(id)
+	}
+
+	handleRequestsBlocked(msg: RequestsBlocked) {
+		this.#requestId.handleRequestsBlocked(msg)
 	}
 }
 
@@ -83,8 +124,8 @@ export class Decoder {
 		const t = await this.messageType()
 		const advertisedLength = await this.r.getU16()
 		if (advertisedLength > this.r.byteLength) {
-			console.error(
-				`message: ${ControlMessageType.toString(t)} length mismatch: advertised ${advertisedLength} > ${this.r.byteLength} received`,
+			log.warn(
+				`message length mismatch: ${ControlMessageType.toString(t)} advertised ${advertisedLength} > ${this.r.byteLength} received`,
 			)
 			// NOTE(itzmanish): should we have a timeout and retry few times even if timeout is reached?
 			await this.r.waitForBytes(advertisedLength)
@@ -94,6 +135,12 @@ export class Decoder {
 
 		let res: MessageWithType
 		switch (t) {
+			case ControlMessageType.GoAway:
+				res = {
+					type: t,
+					message: GoAway.deserialize(payload),
+				}
+				break
 			case ControlMessageType.Subscribe:
 				res = {
 					type: t,
@@ -104,12 +151,6 @@ export class Decoder {
 				res = {
 					type: t,
 					message: SubscribeOk.deserialize(payload),
-				}
-				break
-			case ControlMessageType.SubscribeError:
-				res = {
-					type: t,
-					message: SubscribeError.deserialize(payload),
 				}
 				break
 			case ControlMessageType.Unsubscribe:
@@ -142,34 +183,16 @@ export class Decoder {
 					message: PublishOk.deserialize(payload),
 				}
 				break
-			case ControlMessageType.PublishError:
-				res = {
-					type: t,
-					message: PublishError.deserialize(payload),
-				}
-				break
 			case ControlMessageType.PublishNamespace:
 				res = {
 					type: t,
 					message: PublishNamespace.deserialize(payload),
 				}
 				break
-			case ControlMessageType.PublishNamespaceOk:
-				res = {
-					type: t,
-					message: PublishNamespaceOk.deserialize(payload),
-				}
-				break
 			case ControlMessageType.PublishNamespaceDone:
 				res = {
 					type: t,
 					message: PublishNamespaceDone.deserialize(payload),
-				}
-				break
-			case ControlMessageType.PublishNamespaceError:
-				res = {
-					type: t,
-					message: PublishNamespaceError.deserialize(payload),
 				}
 				break
 			case ControlMessageType.Fetch:
@@ -190,28 +213,58 @@ export class Decoder {
 					message: FetchOk.deserialize(payload),
 				}
 				break
-			case ControlMessageType.FetchError:
-				res = {
-					type: t,
-					message: FetchError.deserialize(payload),
-				}
-				break
 			case ControlMessageType.SubscribeNamespace:
 				res = {
 					type: t,
 					message: SubscribeNamespace.deserialize(payload),
 				}
 				break
-			case ControlMessageType.SubscribeNamespaceOk:
+			case ControlMessageType.RequestOk:
 				res = {
 					type: t,
-					message: SubscribeNamespaceOk.deserialize(payload),
+					message: RequestOk.deserialize(payload),
 				}
 				break
-			case ControlMessageType.SubscribeNamespaceError:
+			case ControlMessageType.RequestError:
 				res = {
 					type: t,
-					message: SubscribeNamespaceError.deserialize(payload),
+					message: RequestError.deserialize(payload),
+				}
+				break
+			case ControlMessageType.PublishNamespaceCancel:
+				res = {
+					type: t,
+					message: PublishNamespaceCancel.deserialize(payload),
+				}
+				break
+			case ControlMessageType.Namespace:
+				res = {
+					type: t,
+					message: Namespace.deserialize(payload),
+				}
+				break
+			case ControlMessageType.NamespaceDone:
+				res = {
+					type: t,
+					message: NamespaceDone.deserialize(payload),
+				}
+				break
+			case ControlMessageType.TrackStatus:
+				res = {
+					type: t,
+					message: TrackStatus.deserialize(payload),
+				}
+				break
+			case ControlMessageType.MaxRequestId:
+				res = {
+					type: t,
+					message: MaxRequestId.deserialize(payload),
+				}
+				break
+			case ControlMessageType.RequestsBlocked:
+				res = {
+					type: t,
+					message: RequestsBlocked.deserialize(payload),
 				}
 				break
 			default:
@@ -219,7 +272,6 @@ export class Decoder {
 		}
 
 		return res
-
 	}
 }
 
@@ -233,20 +285,16 @@ export class Encoder {
 	message(m: MessageWithType): Uint8Array {
 		const { message } = m
 		switch (m.type) {
+			case ControlMessageType.GoAway:
+				return GoAway.serialize(message as GoAway)
 			case ControlMessageType.Subscribe:
 				return Subscribe.serialize(message as Subscribe)
 			case ControlMessageType.SubscribeOk:
 				return SubscribeOk.serialize(message as SubscribeOk)
-			case ControlMessageType.SubscribeError:
-				return SubscribeError.serialize(message as SubscribeError)
 			case ControlMessageType.SubscribeUpdate:
 				return SubscribeUpdate.serialize(message as SubscribeUpdate)
 			case ControlMessageType.SubscribeNamespace:
 				return SubscribeNamespace.serialize(message as SubscribeNamespace)
-			case ControlMessageType.SubscribeNamespaceOk:
-				return SubscribeNamespaceOk.serialize(message as SubscribeNamespaceOk)
-			case ControlMessageType.SubscribeNamespaceError:
-				return SubscribeNamespaceError.serialize(message as SubscribeNamespaceError)
 			case ControlMessageType.Unsubscribe:
 				return Unsubscribe.serialize(message as Unsubscribe)
 			case ControlMessageType.Publish:
@@ -255,14 +303,8 @@ export class Encoder {
 				return PublishDone.serialize(message as PublishDone)
 			case ControlMessageType.PublishOk:
 				return PublishOk.serialize(message as PublishOk)
-			case ControlMessageType.PublishError:
-				return PublishError.serialize(message as PublishError)
 			case ControlMessageType.PublishNamespace:
 				return PublishNamespace.serialize(message as PublishNamespace)
-			case ControlMessageType.PublishNamespaceOk:
-				return PublishNamespaceOk.serialize(message as PublishNamespaceOk)
-			case ControlMessageType.PublishNamespaceError:
-				return PublishNamespaceError.serialize(message as PublishNamespaceError)
 			case ControlMessageType.PublishNamespaceDone:
 				return PublishNamespaceDone.serialize(message as PublishNamespaceDone)
 			case ControlMessageType.Fetch:
@@ -271,8 +313,22 @@ export class Encoder {
 				return FetchCancel.serialize(message as FetchCancel)
 			case ControlMessageType.FetchOk:
 				return FetchOk.serialize(message as FetchOk)
-			case ControlMessageType.FetchError:
-				return FetchError.serialize(message as FetchError)
+			case ControlMessageType.RequestOk:
+				return RequestOk.serialize(message as RequestOk)
+			case ControlMessageType.RequestError:
+				return RequestError.serialize(message as RequestError)
+			case ControlMessageType.PublishNamespaceCancel:
+				return PublishNamespaceCancel.serialize(message as PublishNamespaceCancel)
+			case ControlMessageType.Namespace:
+				return Namespace.serialize(message as Namespace)
+			case ControlMessageType.NamespaceDone:
+				return NamespaceDone.serialize(message as NamespaceDone)
+			case ControlMessageType.TrackStatus:
+				return TrackStatus.serialize(message as TrackStatus)
+			case ControlMessageType.MaxRequestId:
+				return MaxRequestId.serialize(message as MaxRequestId)
+			case ControlMessageType.RequestsBlocked:
+				return RequestsBlocked.serialize(message as RequestsBlocked)
 			default:
 				throw new Error(`unknown message kind in encoder`)
 		}
@@ -282,4 +338,3 @@ export class Encoder {
 		await this.w.write(payload)
 	}
 }
-

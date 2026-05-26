@@ -1,3 +1,7 @@
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
+
 const SUPPORTED = [
 	"avc1", // H.264
 	"hev1", // HEVC (aka h.265)
@@ -63,7 +67,7 @@ export class Encoder {
 			},
 		})
 
-		console.log("Encoder configured", this.#encoderConfig)
+		log.debug("encoder configured", this.#encoderConfig)
 
 		this.#encoder.configure(this.#encoderConfig)
 	}

@@ -1,29 +1,28 @@
-import { ControlMessageType, Version } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters } from "../base_data"
 
 export interface ServerSetup {
-    version: Version
-    params: Parameters
+	params: Parameters
 }
 
 export namespace ServerSetup {
-    export function serialize(v: ServerSetup): Uint8Array {
-        const mainBuf = new MutableBytesBuffer(new Uint8Array())
-        mainBuf.putVarInt(ControlMessageType.ServerSetup)
-        const payloadBuf = new MutableBytesBuffer(new Uint8Array())
-        payloadBuf.putVarInt(v.version)
-        payloadBuf.putBytes(Parameters.serialize(v.params))
-        mainBuf.putU16(payloadBuf.byteLength)
-        mainBuf.putBytes(payloadBuf.Uint8Array)
-        return mainBuf.Uint8Array
-    }
+	export function serialize(v: ServerSetup): Uint8Array {
+		const mainBuf = new MutableBytesBuffer(new Uint8Array())
+		mainBuf.putVarInt(ControlMessageType.ServerSetup)
+		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
+		payloadBuf.putBytes(Parameters.serialize(v.params))
 
-    export function deserialize(reader: ImmutableBytesBuffer): ServerSetup {
-        const version = reader.getNumberVarInt() as Version
-        return {
-            version,
-            params: Parameters.deserialize(reader)
-        }
-    }
+		mainBuf.putU16(payloadBuf.byteLength)
+		mainBuf.putBytes(payloadBuf.Uint8Array)
+		return mainBuf.Uint8Array
+	}
+
+	export function deserialize(reader: ImmutableBytesBuffer): ServerSetup {
+		const numParams = reader.getNumberVarInt()
+		const params = Parameters.deserialize_with_count(reader, numParams)
+		return {
+			params,
+		}
+	}
 }

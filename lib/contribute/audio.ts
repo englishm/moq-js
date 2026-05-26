@@ -1,3 +1,7 @@
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
+
 const SUPPORTED = [
 	// TODO support AAC
 	// "mp4a"
@@ -34,7 +38,7 @@ export class Encoder {
 
 			this.#encoder.configure(this.#encoderConfig)
 		} catch (e) {
-			console.error("Failed to configure AudioEncoder:", e)
+			log.error("failed to configure AudioEncoder", e)
 			throw e
 		}
 	}
@@ -43,7 +47,7 @@ export class Encoder {
 		try {
 			this.#encoder.encode(frame)
 		} catch (e) {
-			console.error("Failed to encode audio frame:", e)
+			log.error("failed to encode audio frame", e)
 			throw e
 		}
 		frame.close()

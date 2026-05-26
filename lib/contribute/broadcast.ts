@@ -6,6 +6,9 @@ import * as Catalog from "../media/catalog"
 
 import { isAudioTrackSettings, isVideoTrackSettings } from "../common/settings"
 import { sleep } from "../transport/utils"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export interface BroadcastConfig {
 	namespace: string[]
@@ -46,16 +49,16 @@ export class Broadcast {
 			const settings = media.getSettings()
 
 			if (media.kind === "audio") {
-				const audioContext = new AudioContext();
+				const audioContext = new AudioContext()
 				audioContext.createMediaStreamSource(new MediaStream([media]))
 				const sampleRate = audioContext.sampleRate
 				Object.assign(settings, {
 					sampleRate,
 				})
-				audioContext.close()
+				void audioContext.close()
 			}
 
-			console.log("track settings", settings, media, mediaTracks)
+			log.debug("track settings", settings, media, mediaTracks)
 
 			if (isVideoTrackSettings(settings)) {
 				if (!config.video) {
@@ -118,17 +121,17 @@ export class Broadcast {
 	}
 
 	async #run() {
-		console.log("[Broadcast] #run loop started")
+		log.debug("run loop started")
 		await this.connection.publish_namespace(this.namespace)
 
-		for (; ;) {
+		for (;;) {
 			const subscriber = await this.connection.subscribed()
 			if (!subscriber) break
 
 			// Run an async task to serve each subscription.
 			this.#serveSubscribe(subscriber).catch((e) => {
 				const err = asError(e)
-				console.warn("failed to serve subscribe", err)
+				log.warn("failed to serve subscribe", err)
 			})
 		}
 	}
@@ -136,7 +139,7 @@ export class Broadcast {
 	async #serveSubscribe(subscriber: SubscribeRecv) {
 		try {
 			const [base, ext] = splitExt(subscriber.track)
-			console.log("serving subscribe", subscriber.track, subscriber.namespace, base, ext)
+			log.debug("serving subscribe", subscriber.track, subscriber.namespace, base, ext)
 			if (ext === "catalog") {
 				await this.#serveCatalog(subscriber, base)
 			} else if (ext === "mp4") {
@@ -147,7 +150,7 @@ export class Broadcast {
 				throw new Error(`unknown subscription: ${subscriber.track}`)
 			}
 		} catch (e) {
-			console.error("failed to serve subscribe", e)
+			log.error("failed to serve subscribe", e)
 			const err = asError(e)
 			// TODO(itzmanish): should check if the error is not found and send appropriate error code
 			await subscriber.close({ code: 0n, reason: `failed to process subscribe: ${err.message}` })
@@ -164,7 +167,7 @@ export class Broadcast {
 		const bytes = Catalog.encode(this.catalog)
 
 		await subscriber.ack()
-		await sleep(500);
+		await sleep(500)
 
 		const stream = await subscriber.subgroup({ group: 0, subgroup: 0 })
 		await stream.write({ object_id: 0, object_payload: bytes })
@@ -176,7 +179,7 @@ export class Broadcast {
 		if (!track) throw new Error(`no track with name ${subscriber.track}`)
 
 		await subscriber.ack()
-		await sleep(500);
+		await sleep(500)
 
 		const init = await track.init()
 
@@ -193,18 +196,18 @@ export class Broadcast {
 		await subscriber.ack()
 
 		// NOTE(itzmanish): hack to make sure subscribe ok reaches before the segement object
-		await sleep(500);
+		await sleep(500)
 
 		const segments = track.segments().getReader()
 
-		for (; ;) {
+		for (;;) {
 			const { value: segment, done } = await segments.read()
 			if (done) break
 
 			// Serve the segment and log any errors that occur.
 			this.#serveSegment(subscriber, segment).catch((e) => {
 				const err = asError(e)
-				console.warn("failed to serve segment", err)
+				log.warn("failed to serve segment", err)
 			})
 		}
 	}
@@ -221,7 +224,7 @@ export class Broadcast {
 
 		// Pipe the segment to the stream.
 		const chunks = segment.chunks().getReader()
-		for (; ;) {
+		for (;;) {
 			const { value, done } = await chunks.read()
 			if (done) break
 
