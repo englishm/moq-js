@@ -15,8 +15,8 @@ app.use((req, res, next) => {
 
 app.use(express.static(__dirname));
 
-const moqPath = path.resolve(__dirname, "../lib/dist");
-app.use("/moq-player", express.static(moqPath));
+const playerPath = path.resolve(__dirname, "../player/dist");
+app.use("/moq-player", express.static(playerPath));
 
 app.get("/", (req, res) => {
 	res.sendFile(path.join(__dirname, "index.html"));

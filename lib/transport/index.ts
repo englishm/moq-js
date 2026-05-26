@@ -1,3 +1,4 @@
+// Core transport
 export { Client } from "./client"
 export type { ClientConfig } from "./client"
 
@@ -7,3 +8,33 @@ export { SubscribeRecv, PublishNamespaceSend } from "./publisher"
 export { PublishNamespaceRecv, SubscribeSend } from "./subscriber"
 export type { SubscribeRequestOptions } from "./subscriber"
 export { FilterType, GroupOrder, SubscriptionFilter } from "./control"
+
+// Subgroup/datagram types (needed by player worker)
+export { SubgroupReader, SubgroupWriter } from "./subgroup"
+export type { SubgroupHeader, SubgroupObject } from "./subgroup"
+export { SubgroupType } from "./subgroup"
+export { ReadableStreamBuffer, WritableStreamBuffer, ReadableWritableStreamBuffer } from "./buffer"
+export type { Reader, Writer } from "./buffer"
+
+// Common utilities re-exported so consumers don't need a separate package
+export { asError } from "../common/error"
+export { Queue, Watch, Notify, Deferred } from "../common/async"
+export type { WatchNext } from "../common/async"
+export { sleep } from "./utils"
+
+// Logger — full surface exported so consumers call setGlobalLogger from here
+export {
+	getLogger,
+	getWorkerLogger,
+	getWorkletLogger,
+	setGlobalLogger,
+	getGlobalLogger,
+	createConsoleLogger,
+	notifyLoggerLevelChanged,
+	onLoggerLevelChange,
+	installWorkerLogReceiver,
+	installWorkletLogReceiver,
+	setWorkerLogLevel,
+	setWorkletLogLevel,
+} from "../common/logger"
+export type { Logger, LogLevel, LogLevelName, ScopedLogger, WorkerLogRecord } from "../common/logger"

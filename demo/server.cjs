@@ -7,7 +7,8 @@ const url = require('url');
 
 const PORT = process.env.PORT || 8080;
 const DEMO_ROOT = __dirname;
-const LIB_DIST_ROOT = path.resolve(__dirname, '..', 'lib', 'dist');
+// Bundles are synced into demo/lib/ by scripts/sync-demo-lib.mjs from player/dist and publisher/dist.
+const LIB_DIST_ROOT = path.resolve(__dirname, 'lib');
 
 // MIME types for common files
 const mimeTypes = {

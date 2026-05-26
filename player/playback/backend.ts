@@ -1,0 +1,152 @@
+import * as Message from "./worker/message"
+import { Audio } from "./audio"
+// import WebWorker from 'web-worker:./Worker.ts';
+import MediaWorker from "web-worker:./worker/index.ts"
+
+import { RingShared } from "../common/ring"
+import { Root, isAudioTrack } from "@moq-js/catalog"
+import { SubgroupHeader } from "@moq-js/transport"
+import { getGlobalLogger, installWorkerLogReceiver, onLoggerLevelChange } from "@moq-js/transport"
+
+export interface PlayerConfig {
+	canvas: OffscreenCanvas
+	catalog: Root
+}
+
+// This is a non-standard way of importing worklet/workers.
+// Unfortunately, it's the only option because of a Vite bug: https://github.com/vitejs/vite/issues/11823
+
+// Responsible for sending messages to the worker and worklet.
+export default class Backend {
+	// General worker
+	#worker: Worker
+
+	// The audio context, which must be created on the main thread.
+	#audio?: Audio
+
+	#eventTarget: EventTarget
+
+	// Dispose function for the logger level change listener
+	#disposeLoggerListener: () => void
+
+	constructor(config: PlayerConfig, eventTarget: EventTarget) {
+		// TODO does this block the main thread? If so, make this async
+		this.#worker = new MediaWorker()
+		this.#worker.addEventListener("message", this.#on.bind(this))
+		this.#eventTarget = eventTarget
+
+		// Install log receiver so worker log records appear in the global logger.
+		installWorkerLogReceiver(this.#worker)
+
+		// Keep the worker's cached log level in sync whenever the global logger changes.
+		this.#disposeLoggerListener = onLoggerLevelChange((level) => {
+			this.send({ logLevel: level })
+		})
+
+		let sampleRate: number | undefined
+		let channels: number | undefined
+
+		for (const track of config.catalog.tracks) {
+			if (isAudioTrack(track)) {
+				if (sampleRate && track.selectionParams.samplerate !== sampleRate) {
+					throw new Error(`TODO multiple audio tracks with different sample rates`)
+				}
+
+				sampleRate = track.selectionParams.samplerate
+
+				// TODO properly handle weird channel configs
+				channels = Math.max(+track.selectionParams.channelConfig, channels ?? 0)
+			}
+		}
+
+		const msg: Message.Config = {}
+
+		// Only configure audio is we have an audio track
+		if (sampleRate && channels) {
+			msg.audio = {
+				channels: channels,
+				sampleRate: sampleRate,
+				ring: new RingShared(channels, sampleRate / 2), // 500ms
+			}
+
+			this.#audio = new Audio(msg.audio)
+		}
+
+		// TODO only send the canvas if we have a video track
+		msg.video = {
+			canvas: config.canvas,
+		}
+
+		this.send({ config: msg }, msg.video.canvas)
+
+		// Send the initial log level to the worker.
+		const logger = getGlobalLogger()
+		const initialLevel = typeof logger.level === "function" ? logger.level() : "error"
+		this.send({ logLevel: initialLevel })
+	}
+
+	pause() {
+		this.send({ play: false })
+	}
+
+	play() {
+		this.send({ play: true })
+	}
+
+	async mute() {
+		await this.#audio?.context.suspend()
+	}
+
+	async unmute() {
+		await this.#audio?.context.resume()
+	}
+
+	init(init: Init) {
+		this.send({ init })
+	}
+
+	segment(segment: Segment) {
+		this.send({ segment }, segment.stream)
+	}
+
+	setVolume(newVolume: number) {
+		this.#audio?.setVolume(newVolume)
+	}
+
+	getVolume(): number {
+		return this.#audio ? this.#audio.getVolume() : 0
+	}
+
+	async close() {
+		this.#disposeLoggerListener()
+		this.#worker.terminate()
+		await this.#audio?.context.close()
+	}
+
+	// Enforce we're sending valid types to the worker
+	private send(msg: Message.ToWorker, ...transfer: Transferable[]) {
+		this.#worker.postMessage(msg, transfer)
+	}
+
+	#on(e: MessageEvent) {
+		// log records are already handled by installWorkerLogReceiver listener.
+		if ((e.data as { log?: unknown })?.log) return
+		// The video worker posts the raw string "waitingforkeyframe" (not wrapped in FromWorker).
+		if (e.data === "waitingforkeyframe") {
+			this.#eventTarget.dispatchEvent(new Event("waitingforkeyframe"))
+		}
+	}
+}
+
+export interface Init {
+	name: string // name of the init track
+	data: Uint8Array
+}
+
+export interface Segment {
+	init: string // name of the init track
+	kind: "audio" | "video"
+	header: SubgroupHeader
+	buffer: Uint8Array
+	stream: ReadableStream<Uint8Array>
+}

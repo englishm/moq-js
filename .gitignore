@@ -5,6 +5,7 @@ npm-debug.log*
 
 # NPM
 **/node_modules/**
+node_modules/
 
 # Build output
 dist

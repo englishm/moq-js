@@ -1,0 +1,27 @@
+{
+	"compilerOptions": {
+		"sourceMap": true,
+		"moduleResolution": "node",
+		"module": "es2022",
+		"target": "es2022",
+		"lib": ["es2022", "dom", "dom.iterable"],
+		"outDir": "./dist",
+		"strict": true,
+		"allowJs": false,
+		"allowSyntheticDefaultImports": true,
+		"downlevelIteration": true,
+		"removeComments": false,
+		"isolatedModules": false,
+		"noEmit": false,
+		"typeRoots": ["./types", "./node_modules/@types"]
+	},
+	"include": [
+		"contribute",
+		"publish",
+		"moq-publisher",
+		"media",
+		"common",
+		"types"
+	],
+	"exclude": ["node_modules", "dist"]
+}
