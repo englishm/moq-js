@@ -13,6 +13,8 @@ export class Renderer {
 
 	#decoder!: AudioDecoder
 	#stream: TransformStream<Frame, AudioData>
+	#droppedSamples = 0
+	#lastDroppedSamplesLog = 0
 
 	constructor(config: Message.ConfigAudio, timeline: Component) {
 		this.#timeline = timeline
@@ -77,7 +79,13 @@ export class Renderer {
 			const written = this.#ring.write(frame)
 
 			if (written < frame.numberOfFrames) {
-				log.warn(`dropped ${frame.numberOfFrames - written} audio samples`)
+				this.#droppedSamples += frame.numberOfFrames - written
+				// This can be noisy during startup/rebuffering. Keep it at trace and aggregate so
+				// debug logging remains usable in demos.
+				if (this.#droppedSamples - this.#lastDroppedSamplesLog >= 9600) {
+					log.trace("dropped audio samples", { count: this.#droppedSamples - this.#lastDroppedSamplesLog })
+					this.#lastDroppedSamplesLog = this.#droppedSamples
+				}
 			}
 		}
 	}

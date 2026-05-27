@@ -32,9 +32,6 @@ export class Subscriber {
 	// Announced broadcasts.
 	#publishedNamespaces = new Map<string, PublishNamespaceRecv>()
 	#publishedNamespacesQueue = new Watch<PublishNamespaceRecv[]>([])
-	// Maps the original PublishNamespace request ID to the namespace key for cleanup.
-	#publishedNamespaceIdMap = new Map<bigint, string>()
-
 	// Our subscribed tracks.
 	#subscribe = new Map<bigint, SubscribeSend>()
 	#trackToIDMap = new Map<string, bigint>()
@@ -112,26 +109,11 @@ export class Subscriber {
 
 		const publishNamespace = new PublishNamespaceRecv(this.#control, msg.namespace, msg.id)
 		this.#publishedNamespaces.set(msg.namespace.join("/"), publishNamespace)
-		this.#publishedNamespaceIdMap.set(msg.id, msg.namespace.join("/"))
-
 		this.#publishedNamespacesQueue.update((queue) => [...queue, publishNamespace])
 	}
 
-	recvPublishNamespaceDone(msg: Control.PublishNamespaceDone) {
-		const key = this.#publishedNamespaceIdMap.get(msg.id)
-		if (key === undefined) {
-			log.warn(`PUBLISH_NAMESPACE_DONE for unknown request id: ${msg.id}`)
-			return
-		}
-		this.#publishedNamespaceIdMap.delete(msg.id)
-		const ns = this.#publishedNamespaces.get(key)
-		if (!ns) {
-			log.warn(`PUBLISH_NAMESPACE_DONE for unknown namespace: ${key}`)
-			return
-		}
-		this.#publishedNamespaces.delete(key)
-		this.#publishedNamespacesQueue.update((queue) => queue.filter((n) => n !== ns))
-		log.debug("publish namespace done", key)
+	recvPublishNamespaceDone(_msg: Control.PublishNamespaceDone) {
+		throw new Error(`TODO PublishNamespaceDone`)
 	}
 
 	async subscribe_namespace(namespace: string[]) {
@@ -197,13 +179,20 @@ export class Subscriber {
 			return
 		}
 
-		// Clean up all maps eagerly so no new data is routed after this point.
-		this.#dropSubscribe(trackID)
-
+		// Per draft-16 section 5.1.1, the subscriber keeps subscription state until it sends
+		// UNSUBSCRIBE. Tear down local state immediately after the control message is sent so
+		// consumers blocked on sub.data() can exit and the player can pause/resume cleanly.
+		let subscribe: SubscribeSend | undefined
 		try {
 			await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: trackID } })
+			subscribe = this.#dropSubscribe(trackID)
 		} catch (error) {
-			log.error(`failed to send UNSUBSCRIBE for track ${track}`, error)
+			log.error(`failed to unsubscribe from track ${track}`, error)
+			return
+		}
+
+		if (subscribe) {
+			await subscribe.onDone(0n, 0n, "unsubscribed")
 		}
 	}
 
@@ -239,7 +228,9 @@ export class Subscriber {
 	async recvPublishDone(msg: Control.PublishDone) {
 		const subscribe = this.#dropSubscribe(msg.id)
 		if (!subscribe) {
-			throw new Error(`publish done for unknown id: ${msg.id}`)
+			// This can arrive after we locally sent UNSUBSCRIBE and dropped the subscription.
+			log.debug(`PUBLISH_DONE for unknown subscription (already torn down locally): ${msg.id}`)
+			return
 		}
 
 		await subscribe.onDone(msg.code, msg.stream_count, msg.reason)
@@ -256,7 +247,8 @@ export class Subscriber {
 		const callback = async (id: bigint) => {
 			const subscribe = this.#subscribe.get(id)
 			if (!subscribe) {
-				throw new Error(`data for unknown subscription: ${id}`)
+				log.debug(`dropping data for already-removed subscription: ${id}`)
+				return
 			}
 			log.trace("dispatching data to subscription", id)
 			return subscribe.onData(reader)
@@ -332,15 +324,8 @@ export class SubscribeSend {
 	}
 
 	async close(_code = 0n, _reason = "") {
-		if (this.#data.closed()) return
-
-		try {
-			await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: this.#id } })
-		} catch (e) {
-			log.warn("failed to send UNSUBSCRIBE on close", e)
-		}
-
-		await this.#data.close()
+		// TODO implement unsubscribe
+		// await this.#inner.sendReset(code, reason)
 	}
 
 	onOk(trackAlias: bigint) {

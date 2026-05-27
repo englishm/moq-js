@@ -1,6 +1,7 @@
 import STYLE_SHEET from "./publisher-moq.css"
 import { PublisherApi, PublisherOptions } from "../publish"
 import { getLogger } from "@moq-js/transport"
+import type { LogLevel } from "@moq-js/transport"
 
 const log = getLogger()
 
@@ -162,6 +163,7 @@ export class PublisherMoq extends HTMLElement {
 				media: this.mediaStream,
 				video: videoConfig,
 				audio: audioConfig,
+				logLevel: (this.getAttribute("loglevel") as LogLevel | null) ?? undefined,
 			}
 
 			log.debug("Publisher Options", opts)
@@ -204,4 +206,5 @@ export class PublisherMoq extends HTMLElement {
 customElements.define("publisher-moq", PublisherMoq)
 export default PublisherMoq
 
-// Logger API is available directly from @moq-js/transport.
+export { setGlobalLogger, getGlobalLogger, createConsoleLogger, notifyLoggerLevelChanged } from "@moq-js/transport"
+export type { Logger, LogLevel } from "@moq-js/transport"

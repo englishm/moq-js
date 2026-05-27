@@ -1,4 +1,5 @@
-import { Client, Connection } from "@moq-js/transport"
+import { Client, Connection, setGlobalLogger, createConsoleLogger } from "@moq-js/transport"
+import type { LogLevel } from "@moq-js/transport"
 import { Broadcast, BroadcastConfig } from "../contribute"
 
 export interface PublisherOptions {
@@ -8,6 +9,8 @@ export interface PublisherOptions {
 	video?: VideoEncoderConfig
 	audio?: AudioEncoderConfig
 	fingerprintUrl?: string
+	/** Enable the default console logger at this level before connecting. */
+	logLevel?: LogLevel
 }
 
 export class PublisherApi {
@@ -18,6 +21,9 @@ export class PublisherApi {
 
 	constructor(opts: PublisherOptions) {
 		this.opts = opts
+		if (opts.logLevel) {
+			setGlobalLogger(createConsoleLogger(opts.logLevel))
+		}
 		this.client = new Client({
 			url: opts.url,
 			fingerprint: opts.fingerprintUrl,

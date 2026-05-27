@@ -77,8 +77,19 @@
 		<script>
 			// Simple configuration setup - let the component handle everything else
 			document.addEventListener("DOMContentLoaded", () => {
+				const level = window.MoQConfig.getLogLevel?.() || "debug";
+				if (window.MoqPublisher?.setGlobalLogger && window.MoqPublisher?.createConsoleLogger) {
+					window.MoqPublisher.setGlobalLogger(window.MoqPublisher.createConsoleLogger(level));
+					console.log("MoQJS publisher logger enabled", level);
+				}
+
 				const urlParams = new URLSearchParams(window.location.search);
 				const relayUrl = urlParams.get("relay") || window.MoQConfig.getRelayUrl();
+				// Fingerprint precedence: ?fingerprint= query param overrides if provided,
+				// otherwise use whatever the bundled config has. The query is an override hook,
+				// not a setter — a missing param means "use the config's value".
+				const fingerprintUrl = urlParams.get("fingerprint") || window.MoQConfig.getFingerprintUrl();
+
 				const publisherElement = document.getElementById("publisher");
 				const currentEnv = document.getElementById("currentEnv");
 				const currentRelay = document.getElementById("currentRelay");
@@ -91,16 +102,22 @@
 				// Configure the publisher component
 				if (publisherElement) {
 					publisherElement.setAttribute("src", relayUrl);
+					publisherElement.setAttribute("loglevel", level);
 
-					if (window.MoQConfig.getFingerprintUrl()) {
-						publisherElement.setAttribute("fingerprint", window.MoQConfig.getFingerprintUrl());
+					if (fingerprintUrl) {
+						publisherElement.setAttribute("fingerprint", fingerprintUrl);
 					}
 
-					// Set the playback base URL for the component's generated player links
+					// Set the playback base URL for the component's generated player links.
+					// Forward both relay and fingerprint overrides so the player page connects to
+					// the same server as the publisher.
 					const baseUrl = window.location.origin + window.location.pathname.replace("index.html", "");
 					const playerParams = new URLSearchParams();
 					if (urlParams.has("relay")) {
 						playerParams.set("relay", relayUrl);
+					}
+					if (urlParams.has("fingerprint")) {
+						playerParams.set("fingerprint", urlParams.get("fingerprint"));
 					}
 					const query = playerParams.toString();
 					publisherElement.setAttribute("playbackbaseurl", `${baseUrl}player.html${query ? `?${query}&` : "?"}namespace=`);

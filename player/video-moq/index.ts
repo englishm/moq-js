@@ -2,6 +2,7 @@ import Player from "../playback/index"
 import { FULLSCREEN_BUTTON, PICTURE_IN_PICTURE_BUTTON, VOLUME_CONTROL } from "./control-buttons"
 import { ENTER_PIP_SVG, EXIT_PIP_SVG, PAUSE_SVG, PLAY_SVG } from "./icons"
 import { getLogger } from "@moq-js/transport"
+import type { LogLevel } from "@moq-js/transport"
 
 const log = getLogger()
 
@@ -211,7 +212,10 @@ export class VideoMoq extends HTMLElement {
 		this.player.addEventListener("play", () => this.dispatchEvent(new Event("play")))
 		this.player.addEventListener("pause", () => this.dispatchEvent(new Event("pause")))
 		this.player.addEventListener("loadeddata", () => this.dispatchEvent(new Event("loadeddata")))
-		this.player.addEventListener("volumechange", () => this.dispatchEvent(new Event("volumechange")))
+		this.player.addEventListener("volumechange", () => {
+			this.updateMuteControls(this.muted)
+			this.dispatchEvent(new Event("volumechange"))
+		})
 		this.player.addEventListener("timeupdate", () => {
 			const event = new CustomEvent("timeupdate", {
 				detail: { currentTime: this.player?.getCurrentTime() },
@@ -267,6 +271,7 @@ export class VideoMoq extends HTMLElement {
 		const urlParams = new URLSearchParams(url.search)
 		const namespace = urlParams.get("namespace") || this.getAttribute("namespace")
 		const fingerprint = urlParams.get("fingerprint") || this.getAttribute("fingerprint")
+		const logLevel = (urlParams.get("logLevel") || this.getAttribute("loglevel")) as LogLevel | null
 
 		// TODO: Unsure if fingerprint should be optional
 		if (namespace === null) return
@@ -274,7 +279,7 @@ export class VideoMoq extends HTMLElement {
 		const trackNumStr = urlParams.get("trackNum") || this.trackNum
 		const trackNum: number = this.auxParseInt(trackNumStr, 0)
 		void Player.create(
-			{ url: url.origin, fingerprint: fingerprint ?? undefined, canvas: this.#canvas, namespace },
+			{ url: url.origin, fingerprint: fingerprint ?? undefined, canvas: this.#canvas, namespace, logLevel: logLevel ?? undefined },
 			trackNum,
 		)
 			.then((player) => this.setPlayer(player))
@@ -433,14 +438,20 @@ export class VideoMoq extends HTMLElement {
 	private async toggleMute() {
 		if (!this.#volumeButton) return
 		this.#volumeButton.disabled = true
+		const nextMuted = !this.muted
+		if (nextMuted && this.#volumeRange && this.#volumeRange.value !== "0") {
+			this.previousVolume = parseFloat(this.#volumeRange.value)
+		}
+		this.updateMuteControls(nextMuted)
 		try {
-			if (this.muted) {
-				await this.unmute()
-			} else {
+			if (nextMuted) {
 				await this.mute()
+			} else {
+				await this.unmute()
 			}
 		} catch (error) {
 			log.error("Error toggling mute:", error)
+			this.updateMuteControls(this.muted)
 		} finally {
 			if (this.#volumeButton) {
 				this.#volumeButton.disabled = false
@@ -451,24 +462,30 @@ export class VideoMoq extends HTMLElement {
 	public unmute(): Promise<void> {
 		return this.player
 			? this.player.mute(false).then(() => {
-					if (!this.#volumeButton) return
-					this.#volumeButton.ariaLabel = "Mute"
-					this.#volumeButton.innerText = "🔊"
-					this.#volumeRange!.value = this.previousVolume.toString()
+					this.updateMuteControls(false)
 				})
 			: Promise.resolve()
 	}
 
 	public mute(): Promise<void> {
+		if (this.#volumeRange && this.#volumeRange.value !== "0") {
+			this.previousVolume = parseFloat(this.#volumeRange.value)
+		}
 		return this.player
 			? this.player.mute(true).then(() => {
-					if (!this.#volumeButton) return
-					this.#volumeButton.ariaLabel = "Unmute"
-					this.#volumeButton.innerText = "🔇"
-					this.previousVolume = parseFloat(this.#volumeRange!.value)
-					this.#volumeRange!.value = "0"
+					this.updateMuteControls(true)
 				})
 			: Promise.resolve()
+	}
+
+	private updateMuteControls(isMuted: boolean) {
+		if (this.#volumeButton) {
+			this.#volumeButton.ariaLabel = isMuted ? "Unmute" : "Mute"
+			this.#volumeButton.innerText = isMuted ? "🔇" : "🔊"
+		}
+		if (this.#volumeRange) {
+			this.#volumeRange.value = isMuted ? "0" : this.previousVolume.toString()
+		}
 	}
 
 	private handleVolumeChange = async (e: Event & { currentTarget: HTMLInputElement }) => {
@@ -729,4 +746,5 @@ export class VideoMoq extends HTMLElement {
 customElements.define("video-moq", VideoMoq)
 export default VideoMoq
 
-// Logger API is available directly from @moq-js/transport.
+export { setGlobalLogger, getGlobalLogger, createConsoleLogger, notifyLoggerLevelChanged } from "@moq-js/transport"
+export type { Logger, LogLevel } from "@moq-js/transport"

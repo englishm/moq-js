@@ -3,7 +3,8 @@ import * as Message from "./worker/message"
 import { Connection, Client, SubgroupReader } from "@moq-js/transport"
 import { asError } from "@moq-js/transport"
 import * as Catalog from "@moq-js/catalog"
-import { getLogger } from "@moq-js/transport"
+import { getLogger, setGlobalLogger, createConsoleLogger } from "@moq-js/transport"
+import type { LogLevel } from "@moq-js/transport"
 
 import Backend from "./backend"
 
@@ -21,6 +22,8 @@ export interface PlayerConfig {
 	namespace: string
 	fingerprint?: string // URL to fetch TLS certificate fingerprint
 	canvas: HTMLCanvasElement
+	/** Enable the default console logger at this level before connecting. */
+	logLevel?: LogLevel
 }
 
 // This class must be created on the main thread due to AudioContext.
@@ -80,6 +83,10 @@ export default class Player extends EventTarget {
 	}
 
 	static async create(config: PlayerConfig, tracknum: number): Promise<Player> {
+		if (config.logLevel) {
+			setGlobalLogger(createConsoleLogger(config.logLevel))
+		}
+
 		const client = new Client({ url: config.url, fingerprint: config.fingerprint })
 		const connection = await client.connect()
 
