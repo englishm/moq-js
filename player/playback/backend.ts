@@ -8,9 +8,20 @@ import { Root, isAudioTrack } from "@moq-js/catalog"
 import { SubgroupHeader } from "@moq-js/transport"
 import { getGlobalLogger, installWorkerLogReceiver, onLoggerLevelChange } from "@moq-js/transport"
 
-export interface PlayerConfig {
-	canvas: OffscreenCanvas
+/**
+ * Backend configuration. The caller (Player) is responsible for resolving
+ * which tracks are actually going to be subscribed to so the backend can
+ * skip the audio ring or the canvas/worker video pipeline when not needed.
+ */
+export interface BackendConfig {
+	/** Catalog used to look up audio selection params (sample rate, channels). */
 	catalog: Root
+	/** Offscreen canvas for the video pipeline. Omit when no video is selected. */
+	canvas?: OffscreenCanvas
+	/** Selected audio track name. Empty string means no audio. */
+	audioTrackName: string
+	/** Selected video track name. Empty string means no video. */
+	videoTrackName: string
 }
 
 // This is a non-standard way of importing worklet/workers.
@@ -33,7 +44,7 @@ export default class Backend {
 	// Bound message handler stored so the same reference is used for add/remove.
 	#onMessage: (e: MessageEvent) => void
 
-	constructor(config: PlayerConfig, eventTarget: EventTarget) {
+	constructor(config: BackendConfig, eventTarget: EventTarget) {
 		// TODO does this block the main thread? If so, make this async
 		this.#worker = new MediaWorker()
 		this.#onMessage = this.#on.bind(this)
@@ -48,41 +59,43 @@ export default class Backend {
 			this.send({ logLevel: level })
 		})
 
-		let sampleRate: number | undefined
-		let channels: number | undefined
-
-		for (const track of config.catalog.tracks) {
-			if (isAudioTrack(track)) {
-				if (sampleRate && track.selectionParams.samplerate !== sampleRate) {
-					throw new Error(`TODO multiple audio tracks with different sample rates`)
-				}
-
-				sampleRate = track.selectionParams.samplerate
-
-				// TODO properly handle weird channel configs
-				channels = Math.max(+track.selectionParams.channelConfig, channels ?? 0)
-			}
-		}
-
 		const msg: Message.Config = {}
 
-		// Only configure audio is we have an audio track
-		if (sampleRate && channels) {
-			msg.audio = {
-				channels: channels,
-				sampleRate: sampleRate,
-				ring: new RingShared(channels, sampleRate / 2), // 500ms
+		// Audio: only build the ring + AudioContext when the player will actually
+		// subscribe to an audio track. Look up that track's selectionParams to
+		// derive sampleRate/channels rather than scanning the whole catalog.
+		if (config.audioTrackName) {
+			const audioTrack = config.catalog.tracks.find((t) => t.name === config.audioTrackName)
+			if (!audioTrack || !isAudioTrack(audioTrack)) {
+				throw new Error(`audio track ${config.audioTrackName} not in catalog`)
 			}
+			const sampleRate = audioTrack.selectionParams.samplerate
+			// TODO properly handle weird channel configs
+			const channels = +audioTrack.selectionParams.channelConfig
 
-			this.#audio = new Audio(msg.audio)
+			if (sampleRate && channels) {
+				msg.audio = {
+					channels,
+					sampleRate,
+					ring: new RingShared(channels, sampleRate / 2), // 500ms
+				}
+				this.#audio = new Audio(msg.audio)
+			}
 		}
 
-		// TODO only send the canvas if we have a video track
-		msg.video = {
-			canvas: config.canvas,
+		// Video: only transfer the canvas when both a canvas is provided and a
+		// video track is selected.
+		if (config.videoTrackName && config.canvas) {
+			msg.video = { canvas: config.canvas }
 		}
 
-		this.send({ config: msg }, msg.video.canvas)
+		// transferControlToOffscreen returns a Transferable; only transfer it when
+		// we actually have a canvas to hand over.
+		if (msg.video) {
+			this.send({ config: msg }, msg.video.canvas)
+		} else {
+			this.send({ config: msg })
+		}
 
 		// Send the initial log level to the worker.
 		const logger = getGlobalLogger()

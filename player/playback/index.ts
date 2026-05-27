@@ -35,7 +35,11 @@ export interface PlayerConfig {
 	url: string
 	namespace: string
 	fingerprint?: string // URL to fetch TLS certificate fingerprint
-	canvas: HTMLCanvasElement
+	/**
+	 * Canvas to render video into. Required unless `selection.video === null`
+	 * (audio-only playback).
+	 */
+	canvas?: HTMLCanvasElement
 	/** Enable the default console logger at this level before connecting. */
 	logLevel?: LogLevel
 	/** Explicit track selection. Defaults to first video + first audio if omitted. */
@@ -43,7 +47,11 @@ export interface PlayerConfig {
 }
 
 export interface PlayerFromCatalogOptions {
-	canvas: HTMLCanvasElement
+	/**
+	 * Canvas to render video into. Required unless `selection.video === null`
+	 * (audio-only playback).
+	 */
+	canvas?: HTMLCanvasElement
 	/** Explicit track selection. Defaults to first video + first audio if omitted. */
 	selection?: TrackSelection
 	/** Initial index into catalog.tracks used by getCurrentTrack/switchTrack. */
@@ -79,7 +87,7 @@ export default class Player extends EventTarget {
 	private constructor(args: {
 		connection: Connection
 		catalog: Catalog.Root
-		canvas: OffscreenCanvas
+		canvas?: OffscreenCanvas
 		audioTrackName: string
 		videoTrackName: string
 		tracknum: number
@@ -93,7 +101,15 @@ export default class Player extends EventTarget {
 		this.#videoTrackName = args.videoTrackName
 		this.#muted = false
 		this.#paused = true
-		this.#backend = new Backend({ canvas: args.canvas, catalog: args.catalog }, this)
+		this.#backend = new Backend(
+			{
+				catalog: args.catalog,
+				canvas: args.canvas,
+				audioTrackName: args.audioTrackName,
+				videoTrackName: args.videoTrackName,
+			},
+			this,
+		)
 		super.dispatchEvent(new CustomEvent("catalogupdated", { detail: args.catalog }))
 		super.dispatchEvent(new CustomEvent("loadedmetadata", { detail: args.catalog }))
 
@@ -136,6 +152,10 @@ export default class Player extends EventTarget {
 	 * already-fetched catalog. Lets callers share one `Connection` across
 	 * multiple players, inspect the catalog before subscribing, or skip a
 	 * kind via `selection: { audio: null }` / `{ video: null }`.
+	 *
+	 * - `canvas` is required unless `selection.video === null` (audio-only).
+	 * - Throws if both audio and video are disabled (nothing to play).
+	 * - Throws if a video track is selected but no canvas is provided.
 	 */
 	static async fromCatalog(
 		connection: Connection,
@@ -149,7 +169,18 @@ export default class Player extends EventTarget {
 			video: videoTrackName || "(none)",
 		})
 
-		const canvas = opts.canvas.transferControlToOffscreen()
+		if (!audioTrackName && !videoTrackName) {
+			throw new Error("Player.fromCatalog: no audio or video track selected")
+		}
+		if (videoTrackName && !opts.canvas) {
+			throw new Error("Player.fromCatalog: video track selected but no canvas provided")
+		}
+
+		// Only transfer the canvas to an OffscreenCanvas when we actually have a
+		// video track to render. transferControlToOffscreen mutates the canvas
+		// element irreversibly, so we must not call it for audio-only sessions.
+		const canvas = videoTrackName ? opts.canvas!.transferControlToOffscreen() : undefined
+
 		return new Player({
 			connection,
 			catalog,
@@ -454,8 +485,10 @@ export default class Player extends EventTarget {
 			await this.#ready
 			if (this.#paused) return
 
-			this.subscribeFromTrackName(this.#videoTrackName)
-			if (!this.#muted) {
+			if (this.#videoTrackName) {
+				this.subscribeFromTrackName(this.#videoTrackName)
+			}
+			if (!this.#muted && this.#audioTrackName) {
 				this.subscribeFromTrackName(this.#audioTrackName)
 				await this.#backend.unmute()
 			}
@@ -473,7 +506,9 @@ export default class Player extends EventTarget {
 				!this.#muted && this.#audioTrackName
 					? this.unsubscribeFromTrack(this.#audioTrackName)
 					: Promise.resolve()
-			const videoPromise = this.unsubscribeFromTrack(this.#videoTrackName)
+			const videoPromise = this.#videoTrackName
+				? this.unsubscribeFromTrack(this.#videoTrackName)
+				: Promise.resolve()
 			super.dispatchEvent(new CustomEvent("pause", { detail: { track: this.#videoTrackName } }))
 			log.debug("dispatching pause event")
 
