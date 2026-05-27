@@ -3,8 +3,8 @@
 
 // Development configuration (localhost)
 const LOCALHOST_CONFIG = {
-	relay: "https://localhost:4443",
-	fingerprint: "https://localhost:4443/fingerprint",
+	relay: "https://127.0.0.1:4443",
+	fingerprint: "https://127.0.0.1:4443/fingerprint",
 	environment: "development",
 	logLevel: "debug"
 };

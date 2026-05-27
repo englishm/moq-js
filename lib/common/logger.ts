@@ -250,7 +250,7 @@ function _callerUrl(): string {
  * Scope is derived automatically from the caller's file path.
  */
 export function getLogger(explicitScope?: string): ScopedLogger {
-	const scope = explicitScope ?? _scopeFromUrl(_callerUrl())
+	const scope = explicitScope || _scopeFromUrl(_callerUrl()) || "main"
 
 	return Object.freeze({
 		scope,
@@ -281,7 +281,10 @@ export function setWorkerLogLevel(level: LogLevel): void {
  *   const log = getWorkerLogger()
  */
 export function getWorkerLogger(explicitScope?: string): ScopedLogger {
-	const scope = explicitScope ?? _scopeFromUrl(_callerUrl())
+	// Workers are bundled via rollup-plugin-web-worker-loader and run from blob:
+	// URLs, so the stack-trace based auto-derive cannot recover a source path.
+	// Fall back to "worker" when neither explicit nor derived scope is available.
+	const scope = explicitScope || _scopeFromUrl(_callerUrl()) || "worker"
 
 	function _workerDispatch(level: LogLevelName, args: unknown[]): void {
 		if (!_isEnabled(_workerLogLevel, level)) return
@@ -317,7 +320,9 @@ export function setWorkletLogLevel(level: LogLevel): void {
  *   const log = getWorkletLogger(this.port)
  */
 export function getWorkletLogger(port: MessagePort, explicitScope?: string): ScopedLogger {
-	const scope = explicitScope ?? _scopeFromUrl(_callerUrl())
+	// AudioWorklet modules run from blob: URLs too, so the auto-derive falls back
+	// to "worklet" when neither explicit nor derived scope is available.
+	const scope = explicitScope || _scopeFromUrl(_callerUrl()) || "worklet"
 
 	function _workletDispatch(level: LogLevelName, args: unknown[]): void {
 		if (!_isEnabled(_workletLogLevel, level)) return

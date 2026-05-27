@@ -17,6 +17,20 @@ const log = getLogger()
 export type Range = Message.Range
 export type Timeline = Message.Timeline
 
+/**
+ * Optional explicit track selection passed when constructing a Player.
+ *
+ * - `string`: subscribe to the named track. Throws if the catalog does not
+ *   contain a track of the matching kind with that name.
+ * - `null`: do not subscribe to a track of this kind.
+ * - omitted (`undefined`): pick the first track of this kind in the catalog
+ *   (current default behavior).
+ */
+export interface TrackSelection {
+	video?: string | null
+	audio?: string | null
+}
+
 export interface PlayerConfig {
 	url: string
 	namespace: string
@@ -24,6 +38,16 @@ export interface PlayerConfig {
 	canvas: HTMLCanvasElement
 	/** Enable the default console logger at this level before connecting. */
 	logLevel?: LogLevel
+	/** Explicit track selection. Defaults to first video + first audio if omitted. */
+	selection?: TrackSelection
+}
+
+export interface PlayerFromCatalogOptions {
+	canvas: HTMLCanvasElement
+	/** Explicit track selection. Defaults to first video + first audio if omitted. */
+	selection?: TrackSelection
+	/** Initial index into catalog.tracks used by getCurrentTrack/switchTrack. */
+	tracknum?: number
 }
 
 // This class must be created on the main thread due to AudioContext.
@@ -52,19 +76,26 @@ export default class Player extends EventTarget {
 	#trackTasks: Map<string, Promise<void>> = new Map()
 	#timeUpdateInterval?: ReturnType<typeof setInterval>
 
-	private constructor(connection: Connection, catalog: Catalog.Root, tracknum: number, canvas: OffscreenCanvas) {
+	private constructor(args: {
+		connection: Connection
+		catalog: Catalog.Root
+		canvas: OffscreenCanvas
+		audioTrackName: string
+		videoTrackName: string
+		tracknum: number
+	}) {
 		super()
-		this.#connection = connection
-		this.#catalog = catalog
-		this.#tracksByName = new Map(catalog.tracks.map((track) => [track.name, track]))
-		this.#tracknum = tracknum
-		this.#audioTrackName = catalog.tracks.find((track) => Catalog.isAudioTrack(track))?.name ?? ""
-		this.#videoTrackName = catalog.tracks.find((track) => Catalog.isVideoTrack(track))?.name ?? ""
+		this.#connection = args.connection
+		this.#catalog = args.catalog
+		this.#tracksByName = new Map(args.catalog.tracks.map((track) => [track.name, track]))
+		this.#tracknum = args.tracknum
+		this.#audioTrackName = args.audioTrackName
+		this.#videoTrackName = args.videoTrackName
 		this.#muted = false
 		this.#paused = true
-		this.#backend = new Backend({ canvas, catalog }, this)
-		super.dispatchEvent(new CustomEvent("catalogupdated", { detail: catalog }))
-		super.dispatchEvent(new CustomEvent("loadedmetadata", { detail: catalog }))
+		this.#backend = new Backend({ canvas: args.canvas, catalog: args.catalog }, this)
+		super.dispatchEvent(new CustomEvent("catalogupdated", { detail: args.catalog }))
+		super.dispatchEvent(new CustomEvent("loadedmetadata", { detail: args.catalog }))
 
 		const abort = new Promise<void>((resolve, reject) => {
 			this.#close = resolve
@@ -82,7 +113,7 @@ export default class Player extends EventTarget {
 		})
 	}
 
-	static async create(config: PlayerConfig, tracknum: number): Promise<Player> {
+	static async create(config: PlayerConfig, tracknum: number = 0): Promise<Player> {
 		if (config.logLevel) {
 			setGlobalLogger(createConsoleLogger(config.logLevel))
 		}
@@ -93,9 +124,40 @@ export default class Player extends EventTarget {
 		const catalog = await fetchCatalog(connection, [config.namespace])
 		log.debug("catalog", catalog)
 
-		const canvas = config.canvas.transferControlToOffscreen()
+		return Player.fromCatalog(connection, catalog as Catalog.Root, {
+			canvas: config.canvas,
+			selection: config.selection,
+			tracknum,
+		})
+	}
 
-		return new Player(connection, catalog as any, tracknum, canvas)
+	/**
+	 * Construct a player from an already-connected transport and an
+	 * already-fetched catalog. Lets callers share one `Connection` across
+	 * multiple players, inspect the catalog before subscribing, or skip a
+	 * kind via `selection: { audio: null }` / `{ video: null }`.
+	 */
+	static async fromCatalog(
+		connection: Connection,
+		catalog: Catalog.Root,
+		opts: PlayerFromCatalogOptions,
+	): Promise<Player> {
+		const audioTrackName = resolveAudioTrack(catalog, opts.selection?.audio)
+		const videoTrackName = resolveVideoTrack(catalog, opts.selection?.video)
+		log.debug("selected tracks", {
+			audio: audioTrackName || "(none)",
+			video: videoTrackName || "(none)",
+		})
+
+		const canvas = opts.canvas.transferControlToOffscreen()
+		return new Player({
+			connection,
+			catalog,
+			canvas,
+			audioTrackName,
+			videoTrackName,
+			tracknum: opts.tracknum ?? 0,
+		})
 	}
 
 	async #run() {
@@ -447,9 +509,45 @@ export default class Player extends EventTarget {
 	*/
 }
 
-// Fetch the catalog from the server by subscribing to the well-known ".catalog" track.
-// This is an application-layer convention owned by the player, not the transport.
-async function fetchCatalog(connection: Connection, namespace: string[]): Promise<Catalog.Root> {
+/**
+ * Resolve a {@link TrackSelection} choice to a concrete track name.
+ *
+ * - `null`: caller explicitly asked to skip this kind. Returns "".
+ * - `string`: must exist in the catalog with the matching kind, else throws.
+ * - `undefined`: pick the first track of this kind in the catalog ("" if none).
+ */
+function resolveAudioTrack(catalog: Catalog.Root, choice: string | null | undefined): string {
+	if (choice === null) return ""
+	if (typeof choice === "string") {
+		const track = catalog.tracks.find((t) => t.name === choice)
+		if (!track || !Catalog.isAudioTrack(track)) {
+			throw new Error(`audio track ${choice} not found in catalog`)
+		}
+		return choice
+	}
+	return catalog.tracks.find(Catalog.isAudioTrack)?.name ?? ""
+}
+
+function resolveVideoTrack(catalog: Catalog.Root, choice: string | null | undefined): string {
+	if (choice === null) return ""
+	if (typeof choice === "string") {
+		const track = catalog.tracks.find((t) => t.name === choice)
+		if (!track || !Catalog.isVideoTrack(track)) {
+			throw new Error(`video track ${choice} not found in catalog`)
+		}
+		return choice
+	}
+	return catalog.tracks.find(Catalog.isVideoTrack)?.name ?? ""
+}
+
+/**
+ * Fetch the catalog from the server by subscribing to the well-known ".catalog" track.
+ *
+ * This is an application-layer convention owned by the player layer, not the
+ * transport. Exposed for callers that want to inspect a catalog (track names,
+ * codecs, etc.) before constructing a Player via {@link Player.fromCatalog}.
+ */
+export async function fetchCatalog(connection: Connection, namespace: string[]): Promise<Catalog.Root> {
 	const subscribe = await connection.subscribe(namespace, ".catalog")
 	try {
 		log.debug("catalog subscribe request sent; waiting for catalog data")

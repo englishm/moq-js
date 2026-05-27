@@ -31,7 +31,9 @@ const basePlugins = [
 ]
 
 module.exports = [
-	// Web component (video-moq) bundle + ESM
+	// Web component (video-moq) bundle + ESM.
+	// IIFE exposes a namespace object: window.MoqPlayer.default is VideoMoq,
+	// and named exports like setGlobalLogger / createConsoleLogger are siblings.
 	{
 		input: pkg["wc-player"],
 		output: [
@@ -40,6 +42,7 @@ module.exports = [
 				format: "iife",
 				name: "MoqPlayer",
 				sourcemap: true,
+				exports: "named",
 			},
 			{
 				file: pkg.exports["."].import,
@@ -49,7 +52,9 @@ module.exports = [
 		],
 		plugins: [...basePlugins, css()],
 	},
-	// Simple Player (class-based, no web component) bundle + ESM
+	// Simple Player (class-based, no web component) bundle + ESM.
+	// Same IIFE shape: window.MoqSimplePlayer.default is the Player class,
+	// fetchCatalog and the logger exports are sibling fields.
 	{
 		input: pkg["simple-player"],
 		output: [
@@ -58,6 +63,7 @@ module.exports = [
 				format: "iife",
 				name: "MoqSimplePlayer",
 				sourcemap: true,
+				exports: "named",
 			},
 			{
 				file: pkg.exports["./simple-player"].import,
