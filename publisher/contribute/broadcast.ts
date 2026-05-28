@@ -46,66 +46,9 @@ export class Broadcast {
 
 		const mediaTracks = this.config.media.getTracks()
 		for (const media of mediaTracks) {
-			const track = new Track(media, config)
+			const { track, entry } = this.#buildTrack(media, config)
 			this.#tracks.set(track.name, track)
-
-			const settings = media.getSettings()
-
-			if (media.kind === "audio") {
-				const audioContext = new AudioContext()
-				audioContext.createMediaStreamSource(new MediaStream([media]))
-				const sampleRate = audioContext.sampleRate
-				Object.assign(settings, {
-					sampleRate,
-				})
-				void audioContext.close()
-			}
-
-			log.debug("track settings", settings, media, mediaTracks)
-
-			if (isVideoTrackSettings(settings)) {
-				if (!config.video) {
-					throw new Error("no video configuration provided")
-				}
-
-				const video: Catalog.VideoTrack = {
-					namespace: this.namespace,
-					name: `${track.name}.m4s`,
-					initTrack: `${track.name}.mp4`,
-					selectionParams: {
-						mimeType: "video/mp4",
-						codec: config.video.codec,
-						width: settings.width,
-						height: settings.height,
-						framerate: settings.frameRate,
-						bitrate: config.video.bitrate,
-					},
-				}
-
-				tracks.push(video)
-			} else if (isAudioTrackSettings(settings)) {
-				if (!config.audio) {
-					throw new Error("no audio configuration provided")
-				}
-
-				const audio: Catalog.AudioTrack = {
-					namespace: this.namespace,
-					name: `${track.name}.m4s`,
-					initTrack: `${track.name}.mp4`,
-					selectionParams: {
-						mimeType: "audio/mp4",
-						codec: config.audio.codec,
-						samplerate: settings.sampleRate,
-						//sampleSize: settings.sampleSize,
-						channelConfig: `${settings.channelCount}`,
-						bitrate: config.audio.bitrate,
-					},
-				}
-
-				tracks.push(audio)
-			} else {
-				throw new Error(`unknown track type: ${media.kind}`)
-			}
+			tracks.push(entry)
 		}
 
 		this.catalog = {
@@ -121,6 +64,136 @@ export class Broadcast {
 		}
 
 		this.#running = this.#run()
+	}
+
+	/**
+	 * Build a Track + matching Catalog entry from a MediaStreamTrack and a
+	 * broadcast config. Used by both the constructor and `addTrack` so the
+	 * catalog-entry shape stays in sync.
+	 */
+	#buildTrack(
+		media: MediaStreamTrack,
+		config: { audio?: AudioEncoderConfig; video?: VideoEncoderConfig },
+	): { track: Track; entry: Catalog.Track } {
+		const track = new Track(media, { ...this.config, audio: config.audio, video: config.video })
+
+		const settings = media.getSettings()
+
+		if (media.kind === "audio") {
+			const audioContext = new AudioContext()
+			audioContext.createMediaStreamSource(new MediaStream([media]))
+			const sampleRate = audioContext.sampleRate
+			Object.assign(settings, {
+				sampleRate,
+			})
+			void audioContext.close()
+		}
+
+		log.debug("track settings", settings, media)
+
+		if (isVideoTrackSettings(settings)) {
+			if (!config.video) {
+				throw new Error("no video configuration provided")
+			}
+
+			const entry: Catalog.VideoTrack = {
+				namespace: this.namespace,
+				name: `${track.name}.m4s`,
+				initTrack: `${track.name}.mp4`,
+				selectionParams: {
+					mimeType: "video/mp4",
+					codec: config.video.codec,
+					width: settings.width,
+					height: settings.height,
+					framerate: settings.frameRate,
+					bitrate: config.video.bitrate,
+				},
+			}
+
+			return { track, entry }
+		} else if (isAudioTrackSettings(settings)) {
+			if (!config.audio) {
+				throw new Error("no audio configuration provided")
+			}
+
+			const entry: Catalog.AudioTrack = {
+				namespace: this.namespace,
+				name: `${track.name}.m4s`,
+				initTrack: `${track.name}.mp4`,
+				selectionParams: {
+					mimeType: "audio/mp4",
+					codec: config.audio.codec,
+					samplerate: settings.sampleRate,
+					//sampleSize: settings.sampleSize,
+					channelConfig: `${settings.channelCount}`,
+					bitrate: config.audio.bitrate,
+				},
+			}
+
+			return { track, entry }
+		} else {
+			throw new Error(`unknown track type: ${media.kind}`)
+		}
+	}
+
+	/**
+	 * Add a media track to a running broadcast and append a matching entry
+	 * to `this.catalog.tracks`. The next subscriber that requests `.catalog`
+	 * will see the updated catalog. Existing subscribers do not automatically
+	 * resubscribe — the application is expected to signal them out-of-band
+	 * (e.g. its own room WebSocket) so they can call `Player.setCatalog` on
+	 * the subscriber side and decide whether to subscribe to the new track.
+	 *
+	 * Throws if a track with the same generated name (derived from
+	 * `media.kind`) already exists. The audio/video encoder config can be
+	 * supplied here to override the broadcast-wide one, or omitted to fall
+	 * back to whatever was passed to the `Broadcast` constructor.
+	 */
+	addTrack(media: MediaStreamTrack, config: VideoEncoderConfig | AudioEncoderConfig): void {
+		// Choose audio vs video config slot based on the media kind. We use
+		// the per-call config when provided, otherwise fall back to the
+		// broadcast-wide one set in the constructor.
+		const trackConfig = {
+			audio: media.kind === "audio" ? (config as AudioEncoderConfig) : this.config.audio,
+			video: media.kind === "video" ? (config as VideoEncoderConfig) : this.config.video,
+		}
+
+		// Track name is currently derived from media.kind (see Track ctor), so
+		// duplicate detection happens on that name.
+		if (this.#tracks.has(media.kind)) {
+			throw new Error(`track with name '${media.kind}' already exists`)
+		}
+
+		const { track, entry } = this.#buildTrack(media, trackConfig)
+		this.#tracks.set(track.name, track)
+		this.catalog.tracks.push(entry)
+	}
+
+	/**
+	 * Remove a previously-added track. Closes the underlying encoder pipeline
+	 * cleanly so existing subscribers see a clean PUBLISH_DONE for the
+	 * removed track's m4s subscription, then removes the entry from
+	 * `this.catalog.tracks`.
+	 *
+	 * Idempotent: returns silently if no track with that name exists.
+	 *
+	 * The `name` parameter matches the internal Track name (currently
+	 * `media.kind`, e.g. `"audio"` or `"video"`). It is NOT the catalog
+	 * entry name, which has a `.m4s` suffix.
+	 */
+	async removeTrack(name: string): Promise<void> {
+		const track = this.#tracks.get(name)
+		if (!track) return
+
+		await track.close()
+		this.#tracks.delete(name)
+
+		// Catalog entries use `${trackName}.m4s` as their name.
+		const entryName = `${name}.m4s`
+		const idx = this.catalog.tracks.findIndex((t) => t.name === entryName)
+		if (idx >= 0) {
+			this.catalog.tracks.splice(idx, 1)
+		}
 	}
 
 	async #run() {

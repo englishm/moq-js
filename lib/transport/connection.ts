@@ -29,6 +29,10 @@ export class Connection {
 	// Async work running in the background
 	#running: Promise<void>
 
+	// Guards against double-close. WebTransport.close() throws synchronously if
+	// the session is already closed, so we make close() idempotent.
+	#closed = false
+
 	constructor(quic: WebTransport, stream: ControlStream, objects: Objects) {
 		this.#quic = quic
 		this.#controlStream = stream
@@ -41,7 +45,16 @@ export class Connection {
 	}
 
 	close(code = 0, reason = "") {
-		this.#quic.close({ closeCode: code, reason })
+		if (this.#closed) return
+		this.#closed = true
+		try {
+			this.#quic.close({ closeCode: code, reason })
+		} catch (e) {
+			// WebTransport.close() throws synchronously if the session is already
+			// closed (e.g. remote peer terminated the session). That's not an error
+			// we want to propagate to callers.
+			log.debug("Connection.close swallowed underlying throw", e)
+		}
 	}
 
 	async #run(): Promise<void> {

@@ -56,6 +56,12 @@ export interface PlayerFromCatalogOptions {
 	selection?: TrackSelection
 	/** Initial index into catalog.tracks used by getCurrentTrack/switchTrack. */
 	tracknum?: number
+	/**
+	 * Namespace this player is bound to. Required when callers want to use
+	 * `Player.getNamespace()` together with `fetchCatalog` to refresh the
+	 * catalog at runtime via `Player.setCatalog`.
+	 */
+	namespace: string
 }
 
 // This class must be created on the main thread due to AudioContext.
@@ -66,6 +72,7 @@ export default class Player extends EventTarget {
 	//#timeline = new Watch<Timeline | undefined>(undefined)
 
 	#connection: Connection
+	#namespace: string
 	#catalog: Catalog.Root
 	#tracksByName: Map<string, Catalog.Track>
 	#tracknum: number
@@ -82,10 +89,16 @@ export default class Player extends EventTarget {
 	#abort!: (err: Error) => void
 	#ready: Promise<void>
 	#trackTasks: Map<string, Promise<void>> = new Map()
+	// Tracks whether each active subscription ended cleanly (PUBLISH_DONE or
+	// cancellation) vs. due to an unexpected error. Used to auto-close the
+	// Player when the publisher terminates the broadcast cleanly.
+	#trackEndedCleanly: Map<string, boolean> = new Map()
 	#timeUpdateInterval?: ReturnType<typeof setInterval>
+	#isClosed = false
 
 	private constructor(args: {
 		connection: Connection
+		namespace: string
 		catalog: Catalog.Root
 		canvas?: OffscreenCanvas
 		audioTrackName: string
@@ -94,6 +107,7 @@ export default class Player extends EventTarget {
 	}) {
 		super()
 		this.#connection = args.connection
+		this.#namespace = args.namespace
 		this.#catalog = args.catalog
 		this.#tracksByName = new Map(args.catalog.tracks.map((track) => [track.name, track]))
 		this.#tracknum = args.tracknum
@@ -144,6 +158,7 @@ export default class Player extends EventTarget {
 			canvas: config.canvas,
 			selection: config.selection,
 			tracknum,
+			namespace: config.namespace,
 		})
 	}
 
@@ -183,6 +198,7 @@ export default class Player extends EventTarget {
 
 		return new Player({
 			connection,
+			namespace: opts.namespace,
 			catalog,
 			canvas,
 			audioTrackName,
@@ -255,6 +271,14 @@ export default class Player extends EventTarget {
 
 		let eventOfFirstSegmentSent = false
 		const sub = await this.#connection.subscribe(track.namespace, track.name)
+		// Assume clean termination unless an unexpected error is thrown.
+		// A clean exit means either:
+		//   - sub.data() returned undefined (queue closed: PUBLISH_DONE code 0)
+		//   - the for-loop body threw an Error containing "PUBLISH_DONE" (queue
+		//     aborted by subscriber.onDone with non-zero code; still a protocol
+		//     clean shutdown, not an internal failure)
+		//   - the error message includes "cancelled" (explicit local cancel)
+		this.#trackEndedCleanly.set(track.name, true)
 
 		try {
 			log.debug("starting segment data loop")
@@ -291,9 +315,17 @@ export default class Player extends EventTarget {
 				})
 			}
 		} catch (error) {
-			if (error instanceof Error && error.message.includes("cancelled")) {
+			const message = error instanceof Error ? error.message : ""
+			if (message.includes("cancelled")) {
 				log.debug("cancelled subscription to track", track.name)
+			} else if (message.includes("PUBLISH_DONE")) {
+				// Protocol-level clean shutdown from the publisher (draft-16
+				// PUBLISH_DONE). subscriber.onDone aborts the data queue with this
+				// message when code != 0 (e.g. publisher ended the broadcast with
+				// a non-zero status). Not an error consumers should react to.
+				log.debug("publisher ended subscription cleanly via PUBLISH_DONE", { track: track.name, message })
 			} else {
+				this.#trackEndedCleanly.set(track.name, false)
 				log.error("error in runTrack", error)
 				super.dispatchEvent(new CustomEvent("error", { detail: error }))
 			}
@@ -313,11 +345,43 @@ export default class Player extends EventTarget {
 		this.#trackTasks.set(track.name, task)
 
 		task.catch((err) => {
+			this.#trackEndedCleanly.set(track.name, false)
 			log.error(`error subscribing to track ${track.name}`, err)
 			super.dispatchEvent(new CustomEvent("error", { detail: err }))
 		}).finally(() => {
 			this.#trackTasks.delete(track.name)
+			this.#maybeAutoClose()
 		})
+	}
+
+	// When all active track subscriptions have terminated, decide whether the
+	// player should auto-close. We only auto-close if at least one track ran
+	// and every track ended cleanly (PUBLISH_DONE or local cancellation). If
+	// any track errored, we leave Player.close() to the consumer / #abort path.
+	#maybeAutoClose() {
+		if (this.#isClosed) return
+		if (this.#trackTasks.size > 0) return
+		if (this.#paused) return
+		if (this.#trackEndedCleanly.size === 0) return
+
+		let allClean = true
+		for (const clean of this.#trackEndedCleanly.values()) {
+			if (!clean) {
+				allClean = false
+				break
+			}
+		}
+		this.#trackEndedCleanly.clear()
+
+		if (!allClean) return
+
+		log.debug("all tracks ended cleanly; auto-closing player")
+		this.#isClosed = true
+		// Resolve the #running promise so closed() returns undefined. Do this
+		// directly rather than calling close() to avoid tearing down the
+		// underlying connection — consumers may still want to reconnect.
+		this.#close()
+		this.#stopEmittingTimeUpdate()
 	}
 
 	#startEmittingTimeUpdate() {
@@ -336,6 +400,61 @@ export default class Player extends EventTarget {
 
 	getCatalog() {
 		return this.#catalog
+	}
+
+	/**
+	 * Returns the underlying transport Connection so callers can issue
+	 * ad-hoc subscribes (e.g. `fetchCatalog(player.getConnection(),
+	 * [player.getNamespace()])` to refresh the catalog at runtime).
+	 */
+	getConnection(): Connection {
+		return this.#connection
+	}
+
+	/**
+	 * Returns the namespace this player was created against. Useful when
+	 * combined with `getConnection()` and `fetchCatalog` to refresh the
+	 * catalog at runtime.
+	 */
+	getNamespace(): string {
+		return this.#namespace
+	}
+
+	/**
+	 * Replace the in-memory catalog. Rebuilds the internal `#tracksByName`
+	 * map so subsequent `subscribeFromTrackName(name)` calls find
+	 * newly-added tracks.
+	 *
+	 * Does NOT subscribe or unsubscribe to anything — that decision belongs
+	 * to the caller. Dispatches a `catalogupdated` CustomEvent (same event
+	 * name used in the constructor) so consumers can listen and decide
+	 * which tracks to subscribe to.
+	 *
+	 * Policy for `#videoTrackName` / `#audioTrackName`:
+	 *  - If the currently-selected track name is still present in the new
+	 *    catalog, keep it.
+	 *  - Otherwise, fall back to the first track of that kind in the new
+	 *    catalog, or `""` if none exist.
+	 *
+	 * Note: this does not retroactively change any active subscription. If
+	 * the currently-selected track is removed from the catalog, the
+	 * already-running track task continues until the publisher tears it
+	 * down (or the caller explicitly calls `unsubscribeFromTrack`).
+	 */
+	setCatalog(catalog: Catalog.Root): void {
+		this.#catalog = catalog
+		this.#tracksByName = new Map(catalog.tracks.map((track) => [track.name, track]))
+
+		// Keep current track selection if still present, else fall back to
+		// the first track of that kind, else "".
+		if (this.#videoTrackName && !this.#tracksByName.has(this.#videoTrackName)) {
+			this.#videoTrackName = catalog.tracks.find(Catalog.isVideoTrack)?.name ?? ""
+		}
+		if (this.#audioTrackName && !this.#tracksByName.has(this.#audioTrackName)) {
+			this.#audioTrackName = catalog.tracks.find(Catalog.isAudioTrack)?.name ?? ""
+		}
+
+		super.dispatchEvent(new CustomEvent("catalogupdated", { detail: catalog }))
 	}
 
 	getCurrentTrack() {

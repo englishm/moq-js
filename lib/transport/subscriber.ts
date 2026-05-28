@@ -133,7 +133,13 @@ export class Subscriber {
 	async subscribe(namespace: string[], track: string, opts?: SubscribeRequestOptions) {
 		const id = await this.#control.nextRequestId()
 
-		const subscribe = new SubscribeSend(this.#control, id, namespace, track)
+		const subscribe = new SubscribeSend(this.#control, id, namespace, track, (sid) => {
+			// Local-state cleanup hook so SubscribeSend.close() can drop the
+			// subscription from #subscribe / #trackToIDMap / alias maps. The
+			// returned SubscribeSend (if any) is the same one calling us — we
+			// don't need to do anything else with it here.
+			this.#dropSubscribe(sid)
+		})
 		this.#subscribe.set(id, subscribe)
 
 		this.#trackToIDMap.set(track, id)
@@ -305,6 +311,16 @@ export class SubscribeSend {
 	#control: ControlStream
 	#id: bigint
 	#trackAlias?: bigint // Set when SUBSCRIBE_OK is received
+	// Closed locally once UNSUBSCRIBE has been sent OR a terminal control
+	// message (PUBLISH_DONE / REQUEST_ERROR) was received. Used to make
+	// close() idempotent and to avoid sending UNSUBSCRIBE for a subscription
+	// that the publisher has already terminated.
+	#closed = false
+	// Hook back into the owning Subscriber so close() can drop local
+	// bookkeeping (subscribe map, trackToID map, alias maps). Not invoked when
+	// the subscription was already terminated by the publisher — the receive
+	// path drops state itself in that case.
+	#onClose: (id: bigint) => void
 
 	readonly namespace: string[]
 	readonly track: string
@@ -312,11 +328,18 @@ export class SubscribeSend {
 	// A queue of received streams for this subscription.
 	#data = new Queue<TrackReader | SubgroupReader>()
 
-	constructor(control: ControlStream, id: bigint, namespace: string[], track: string) {
+	constructor(
+		control: ControlStream,
+		id: bigint,
+		namespace: string[],
+		track: string,
+		onClose: (id: bigint) => void,
+	) {
 		this.#control = control // so we can send messages
 		this.#id = id
 		this.namespace = namespace
 		this.track = track
+		this.#onClose = onClose
 	}
 
 	get trackAlias(): bigint | undefined {
@@ -324,8 +347,34 @@ export class SubscribeSend {
 	}
 
 	async close(_code = 0n, _reason = "") {
-		// TODO implement unsubscribe
-		// await this.#inner.sendReset(code, reason)
+		// Idempotent. The subscription may already be torn down because:
+		//   - The publisher sent PUBLISH_DONE / REQUEST_ERROR (recv path
+		//     called onDone/onError, which sets #closed).
+		//   - A previous close() call already sent UNSUBSCRIBE.
+		// In either case there's nothing more to do — re-sending UNSUBSCRIBE
+		// would target an unknown subscription id on the relay.
+		if (this.#closed) return
+		this.#closed = true
+
+		try {
+			await this.#control.send({
+				type: Control.ControlMessageType.Unsubscribe,
+				message: { id: this.#id },
+			})
+		} catch (err) {
+			log.warn("failed to send UNSUBSCRIBE on close", { id: this.#id, track: this.track, err })
+			// Still drop local state below — keeping a stale entry around
+			// after a control-stream failure helps nothing.
+		}
+
+		// Drop the local subscription bookkeeping so a follow-up
+		// subscribe(namespace, sameTrack) on this connection can succeed.
+		this.#onClose(this.#id)
+
+		// Close the data queue so anyone awaiting sub.data() unblocks.
+		if (!this.#data.closed()) {
+			await this.#data.close()
+		}
 	}
 
 	onOk(trackAlias: bigint) {
@@ -336,6 +385,9 @@ export class SubscribeSend {
 	// FIXME(itzmanish): implement correctly
 	async onDone(code: bigint, streamCount: bigint, reason: string) {
 		log.debug("subscription done", { id: this.#id, code, streamCount, reason, track: this.track })
+		// Publisher terminated the subscription — no need for us to send
+		// UNSUBSCRIBE on a subsequent close().
+		this.#closed = true
 
 		if (code === 0n) {
 			return await this.#data.close()
@@ -346,6 +398,8 @@ export class SubscribeSend {
 	}
 
 	async onError(code: bigint, reason: string) {
+		// Relay/publisher errored the subscription — same reasoning as onDone.
+		this.#closed = true
 		if (code == 0n) {
 			return await this.#data.close()
 		}

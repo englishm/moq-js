@@ -127,6 +127,19 @@ export class Track {
 		this.#notify.wake()
 	}
 
+	/**
+	 * Public wrapper around the internal close routine. Flushes the current
+	 * segment (if any), marks the track as closed, and wakes any readers
+	 * blocked in `segments()` so they can observe the closed/errored state.
+	 *
+	 * Calling this on an already-closed Track is a no-op via the underlying
+	 * pipeline's `WritableStream.close()` semantics (it just resolves with
+	 * `#closed === true`).
+	 */
+	async close(err?: Error): Promise<void> {
+		await this.#close(err)
+	}
+
 	async init(): Promise<Uint8Array> {
 		while (!this.#init) {
 			if (this.#closed) throw new Error("track closed")

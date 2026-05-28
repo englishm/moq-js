@@ -4,6 +4,11 @@ import { getWorkerLogger } from "@moq-js/transport"
 
 const log = getWorkerLogger()
 
+// Reason passed to ReadableStream.cancel() when the timeline drops a segment.
+// Exported so other parts of the worker can recognise dropped-segment failures
+// vs. genuine writable errors.
+export const DROPPED_SEGMENT_REASON = "dropped: segment too slow/stale"
+
 export interface Range {
 	start: number
 	end: number
@@ -86,19 +91,24 @@ export class Component {
 			if (this.#current) {
 				if (value.sequence < this.#current.sequence) {
 					// Our segment is older than the current, abandon it.
-					log.warn("dropping stale segment", {
+					// NOTE: cancelling the readable side errors the writable side
+					// the producer (worker/index.ts #onSegment) is writing to.
+					// That is expected — #onSegment guards close() against the
+					// resulting "ERRORED writable stream" so dropping a stale
+					// segment is a non-fatal warning, not a pipeline failure.
+					log.debug("dropping stale segment", {
 						currentSequence: this.#current.sequence,
 						nextSequence: value.sequence,
 					})
-					await value.frames.cancel("skipping segment; too old")
+					await value.frames.cancel(DROPPED_SEGMENT_REASON)
 					continue
 				} else {
 					// Our segment is newer than the current, cancel the old one.
-					log.warn("dropping slow segment", {
+					log.debug("dropping slow segment", {
 						currentSequence: this.#current.sequence,
 						nextSequence: value.sequence,
 					})
-					await this.#current.frames.cancel("skipping segment; too slow")
+					await this.#current.frames.cancel(DROPPED_SEGMENT_REASON)
 				}
 			}
 
