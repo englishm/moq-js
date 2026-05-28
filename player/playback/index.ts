@@ -4,13 +4,16 @@ import { Connection, Client, SubgroupReader } from "@moq-js/transport"
 import { asError } from "@moq-js/transport"
 import * as Catalog from "@moq-js/catalog"
 import { getLogger, setGlobalLogger, createConsoleLogger } from "@moq-js/transport"
-import type { LogLevel } from "@moq-js/transport"
+import type { LogLevel, MoqStatsReport, SessionStat, CodecStat } from "@moq-js/transport"
 
 import Backend from "./backend"
 
 // Re-export logger API so consumers of @moq-js/player can configure logging.
 export { setGlobalLogger, getGlobalLogger, createConsoleLogger, notifyLoggerLevelChanged } from "@moq-js/transport"
 export type { Logger, LogLevel } from "@moq-js/transport"
+
+// Re-export stats types so consumers import from one place.
+export type { MoqStatsReport, MoqStat, MoqStatType } from "@moq-js/transport"
 
 const log = getLogger()
 
@@ -96,6 +99,16 @@ export default class Player extends EventTarget {
 	#timeUpdateInterval?: ReturnType<typeof setInterval>
 	#isClosed = false
 
+	// --- stats tracking ---
+	// Approximate time when play() was first called (ms, performance.now()).
+	#playStartMs = 0
+	// Cumulative ms spent in the playing state.
+	#playMs = 0
+	// Timestamp when the current play epoch started (0 if not playing).
+	#playEpochStartMs = 0
+	// Last error message seen via the "error" event.
+	#lastErrorMessage?: string
+
 	private constructor(args: {
 		connection: Connection
 		namespace: string
@@ -138,6 +151,7 @@ export default class Player extends EventTarget {
 		this.#ready = this.#run()
 		this.#ready.catch((err) => {
 			log.error("error in run", err)
+			this.#lastErrorMessage = err instanceof Error ? err.message : String(err)
 			super.dispatchEvent(new CustomEvent("error", { detail: err }))
 			this.#abort(err)
 		})
@@ -326,6 +340,7 @@ export default class Player extends EventTarget {
 				log.debug("publisher ended subscription cleanly via PUBLISH_DONE", { track: track.name, message })
 			} else {
 				this.#trackEndedCleanly.set(track.name, false)
+				this.#lastErrorMessage = message
 				log.error("error in runTrack", error)
 				super.dispatchEvent(new CustomEvent("error", { detail: error }))
 			}
@@ -549,10 +564,115 @@ export default class Player extends EventTarget {
 		}
 	}
 
-	#onMessage(msg: Message.FromWorker) {
-		if (msg.timeline) {
-			//this.#timeline.update(msg.timeline)
+	/**
+	 * Returns a snapshot of stats for this Player as a `Map<id, MoqStat>`.
+	 *
+	 * Stats are cumulative (never reset). Diff two consecutive snapshots to
+	 * compute rates. Each entry has a stable `id` and a `type` discriminator.
+	 *
+	 * Internally fans out to the transport layer (synchronous), the playback
+	 * worker (async, 250 ms timeout), and the audio worklet (async, 250 ms
+	 * timeout) in parallel, then merges the results.
+	 *
+	 * If the worker or worklet times out their entries are omitted from the
+	 * report rather than rejecting the whole call. Check `session.lastErrorMessage`
+	 * if entries are unexpectedly missing.
+	 */
+	async getStats(): Promise<MoqStatsReport> {
+		const nowMs = performance.now()
+		const report: MoqStatsReport = new Map()
+
+		// 1. Transport stats (synchronous).
+		this.#connection.getStats(report)
+
+		// 2. Worker + worklet stats (parallel, best-effort).
+		const [workerEntries, workletEntries] = await Promise.all([
+			this.#backend.getWorkerStats(),
+			this.#backend.getWorkletStats(),
+		])
+		for (const entry of workerEntries) {
+			report.set(entry.id, entry)
 		}
+		for (const entry of workletEntries) {
+			report.set(entry.id, entry)
+		}
+
+		// 3. Session stat.
+		const uptimeMs = nowMs - this.#liveStartTime
+		let playMs = this.#playMs
+		if (this.#playEpochStartMs > 0) {
+			// Currently playing — accumulate the live epoch.
+			playMs += nowMs - this.#playEpochStartMs
+		}
+
+		// ttff: approximate ms from first play() call to first frame rendered.
+		let ttffMs: number | undefined
+		try {
+			const firstFrameMs = await Promise.race([
+				this.#backend.firstFrameRenderedAt(),
+				// Don't wait more than 0ms — only resolve if already done.
+				new Promise<number>((_, reject) => setTimeout(() => reject(new Error("not yet")), 0)),
+			])
+			if (this.#playStartMs > 0) {
+				ttffMs = firstFrameMs - this.#playStartMs
+			}
+		} catch {
+			// First frame not yet rendered; leave ttffMs undefined.
+		}
+
+		const state: SessionStat["state"] = this.#isClosed
+			? "closed"
+			: this.#paused
+				? this.#playStartMs === 0
+					? "idle"
+					: "paused"
+				: "playing"
+
+		const session: SessionStat = {
+			id: "session",
+			type: "session",
+			timestamp: nowMs,
+			state,
+			uptimeMs,
+			playMs,
+			ttffMs,
+			lastErrorMessage: this.#lastErrorMessage,
+		}
+		report.set("session", session)
+
+		// 4. Codec entries from catalog.
+		for (const track of this.#catalog.tracks) {
+			if (Catalog.isVideoTrack(track)) {
+				const codec: CodecStat = {
+					id: `codec:video:${track.name}`,
+					type: "codec",
+					timestamp: nowMs,
+					kind: "video",
+					codec: track.selectionParams.codec,
+					mimeType: track.selectionParams.mimeType,
+					width: track.selectionParams.width,
+					height: track.selectionParams.height,
+					framerate: track.selectionParams.framerate,
+					bitrate: track.selectionParams.bitrate,
+				}
+				report.set(codec.id, codec)
+			} else if (Catalog.isAudioTrack(track)) {
+				const codec: CodecStat = {
+					id: `codec:audio:${track.name}`,
+					type: "codec",
+					timestamp: nowMs,
+					kind: "audio",
+					codec: track.selectionParams.codec,
+					mimeType: track.selectionParams.mimeType,
+					samplerate: track.selectionParams.samplerate,
+					channels: track.selectionParams.channelConfig ? Number(track.selectionParams.channelConfig) : undefined,
+					bitrate: track.selectionParams.bitrate,
+				}
+				report.set(codec.id, codec)
+			}
+		}
+
+		return report
 	}
 
 	async close(err?: Error) {
@@ -601,6 +721,11 @@ export default class Player extends EventTarget {
 	async play() {
 		if (this.#paused) {
 			this.#paused = false
+			// Record the start of this play epoch for cumulative playMs tracking.
+			const nowMs = performance.now()
+			if (this.#playStartMs === 0) this.#playStartMs = nowMs
+			this.#playEpochStartMs = nowMs
+
 			await this.#ready
 			if (this.#paused) return
 
@@ -620,6 +745,11 @@ export default class Player extends EventTarget {
 	async pause() {
 		if (!this.#paused) {
 			this.#paused = true
+			// Accumulate play time for this epoch.
+			if (this.#playEpochStartMs > 0) {
+				this.#playMs += performance.now() - this.#playEpochStartMs
+				this.#playEpochStartMs = 0
+			}
 			const mutePromise = this.#backend.mute()
 			const audioPromise =
 				!this.#muted && this.#audioTrackName

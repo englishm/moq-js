@@ -1,6 +1,8 @@
 import * as Message from "./worker/message"
+import * as WorkletMessage from "./worklet/message"
 import registerMyAudioWorklet from "audio-worklet:./worklet/index.ts"
-import { getLogger, getGlobalLogger, installWorkletLogReceiver, onLoggerLevelChange } from "@moq-js/transport"
+import { getLogger, getGlobalLogger, installWorkletLogReceiver, onLoggerLevelChange, Deferred } from "@moq-js/transport"
+import type { AudioPlaybackStat } from "@moq-js/transport"
 
 const log = getLogger()
 
@@ -12,6 +14,10 @@ export class Audio {
 
 	// Dispose function for the logger level change listener
 	#disposeLoggerListener?: () => void
+
+	// Pending getWorkletStats() requests keyed by requestId.
+	#pendingStatsRequests = new Map<number, { deferred: Deferred<AudioPlaybackStat | undefined>; timeout: ReturnType<typeof setTimeout> }>()
+	#nextStatsRequestId = 1
 
 	constructor(config: Message.ConfigAudio) {
 		this.context = new AudioContext({
@@ -41,6 +47,20 @@ export class Audio {
 		worklet.port.start()
 		installWorkletLogReceiver(worklet.port)
 
+		// Handle non-log messages from the worklet (stats replies).
+		worklet.port.addEventListener("message", (e: MessageEvent) => {
+			// installWorkletLogReceiver already consumed log records; handle stats here.
+			const msg = e.data as WorkletMessage.WorkletStatsMessage
+			if (msg?.stats) {
+				const pending = this.#pendingStatsRequests.get(msg.stats.requestId)
+				if (pending) {
+					clearTimeout(pending.timeout)
+					this.#pendingStatsRequests.delete(msg.stats.requestId)
+					pending.deferred.resolve(msg.stats.entry)
+				}
+			}
+		})
+
 		// Keep the worklet's cached log level in sync whenever the global logger changes.
 		this.#disposeLoggerListener = onLoggerLevelChange((level) => {
 			worklet.port.postMessage({ logLevel: level })
@@ -60,8 +80,25 @@ export class Audio {
 		return worklet
 	}
 
-	private on(_event: MessageEvent) {
-		// TODO
+	/**
+	 * Request a stats snapshot from the AudioWorklet. Returns undefined if the
+	 * worklet is not loaded yet, or times out within 250 ms.
+	 */
+	async getWorkletStats(): Promise<AudioPlaybackStat | undefined> {
+		const worklet = await this.worklet.catch(() => undefined)
+		if (!worklet) return undefined
+
+		const requestId = this.#nextStatsRequestId++
+		const deferred = new Deferred<AudioPlaybackStat | undefined>()
+		const timeout = setTimeout(() => {
+			if (this.#pendingStatsRequests.has(requestId)) {
+				this.#pendingStatsRequests.delete(requestId)
+				deferred.resolve(undefined)
+			}
+		}, 250)
+		this.#pendingStatsRequests.set(requestId, { deferred, timeout })
+		worklet.port.postMessage({ getStats: { requestId } } satisfies WorkletMessage.From)
+		return deferred.promise
 	}
 
 	public setVolume(newVolume: number) {
@@ -74,6 +111,12 @@ export class Audio {
 
 	async close() {
 		this.#disposeLoggerListener?.()
+		// Reject all pending stats requests so callers don't hang.
+		for (const { deferred, timeout } of this.#pendingStatsRequests.values()) {
+			clearTimeout(timeout)
+			deferred.resolve(undefined)
+		}
+		this.#pendingStatsRequests.clear()
 		const worklet = await this.worklet.catch(() => undefined)
 		if (worklet) {
 			worklet.port.close()

@@ -82,6 +82,10 @@ export interface ToWorker {
 	// Sent to update the worker's cached log level when setGlobalLogger is called.
 	logLevel?: LogLevel
 
+	// Sent to request a stats snapshot. The worker replies with a FromWorker
+	// message carrying the same requestId.
+	getStats?: { requestId: number }
+
 	/*
 	// Sent to control playback
 	play?: Play
@@ -96,6 +100,13 @@ export interface FromWorker {
 
 	// Log record forwarded from the worker to the main thread.
 	log?: WorkerLogRecord
+
+	// Stats snapshot reply. requestId matches the ToWorker.getStats request.
+	// entries is a serialised array of MoqStat objects (plain JSON-compatible).
+	stats?: { requestId: number; entries: import("@moq-js/transport").MoqStat[] }
+
+	// Worker signals the first video frame was rendered (triggers ttff on main thread).
+	firstFrameRendered?: true
 }
 
 /*

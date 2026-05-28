@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>MoQ Player — getStats() Demo</title>
+		<script src="/moq-player/moq-simple-player.iife.js"></script>
+		<style>
+			* { box-sizing: border-box; }
+			body {
+				font-family: monospace;
+				margin: 0;
+				background: #111;
+				color: #e0e0e0;
+				display: flex;
+				flex-direction: column;
+				height: 100vh;
+			}
+			h1 { margin: 0.5rem 1rem; font-size: 1rem; color: #7ec8e3; }
+			#layout {
+				display: flex;
+				flex: 1;
+				overflow: hidden;
+				gap: 8px;
+				padding: 0 8px 8px;
+			}
+			#video-panel {
+				display: flex;
+				flex-direction: column;
+				flex: 0 0 640px;
+			}
+			canvas {
+				width: 640px;
+				height: 360px;
+				background: #000;
+				border: 1px solid #333;
+			}
+			#controls {
+				display: flex;
+				gap: 8px;
+				margin-top: 6px;
+				align-items: center;
+				flex-wrap: wrap;
+			}
+			button {
+				background: #333;
+				color: #e0e0e0;
+				border: 1px solid #555;
+				padding: 4px 12px;
+				cursor: pointer;
+				font-family: monospace;
+			}
+			button:hover { background: #444; }
+			label { font-size: 0.85rem; color: #aaa; }
+			input[type="number"] {
+				width: 64px;
+				background: #222;
+				color: #e0e0e0;
+				border: 1px solid #555;
+				padding: 2px 6px;
+				font-family: monospace;
+			}
+			#status { margin-top: 4px; font-size: 0.8rem; color: #aaa; min-height: 1.2em; }
+			#stats-panel {
+				flex: 1;
+				overflow-y: auto;
+				background: #1a1a1a;
+				border: 1px solid #333;
+				padding: 8px;
+				font-size: 0.75rem;
+			}
+			.stat-section {
+				margin-bottom: 10px;
+			}
+			.stat-section-title {
+				color: #7ec8e3;
+				font-weight: bold;
+				border-bottom: 1px solid #333;
+				padding-bottom: 2px;
+				margin-bottom: 4px;
+			}
+			.stat-row {
+				display: flex;
+				justify-content: space-between;
+				padding: 1px 0;
+				border-bottom: 1px solid #1e1e1e;
+			}
+			.stat-key { color: #aaa; }
+			.stat-val { color: #e8e8b0; text-align: right; }
+			.stat-val.alert { color: #ff8080; }
+			#poll-status {
+				padding: 4px 8px;
+				font-size: 0.75rem;
+				color: #555;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>MoQ Player — getStats() Demo</h1>
+		<div id="layout">
+			<div id="video-panel">
+				<canvas id="canvas"></canvas>
+				<div id="controls">
+					<button id="btn-play">Play</button>
+					<button id="btn-pause">Pause</button>
+					<button id="btn-stop">Stop</button>
+					<label>URL <input id="inp-url" type="text" size="40" value="https://interop-relay.cloudflare.mediaoverquic.com" /></label>
+					<label>NS <input id="inp-ns" type="text" size="12" value="bbb" /></label>
+					<label>Poll ms <input id="inp-interval" type="number" value="1000" min="200" /></label>
+				</div>
+				<div id="status">Idle — press Play to start.</div>
+			</div>
+			<div id="stats-panel">
+				<div style="color:#555;font-size:0.75rem">Stats will appear here once playback starts.</div>
+			</div>
+		</div>
+		<div id="poll-status"></div>
+
+		<script>
+			"use strict"
+
+			const { Player, createConsoleLogger, setGlobalLogger } = MoqSimplePlayer
+
+			let player = null
+			let pollTimer = null
+			let lastReport = null
+			let lastReportTs = 0
+
+			const canvas = document.getElementById("canvas")
+			const status = document.getElementById("status")
+			const statsPanel = document.getElementById("stats-panel")
+			const pollStatusEl = document.getElementById("poll-status")
+
+			function setStatus(msg) { status.textContent = msg }
+
+			// ---------------------------------------------------------------------------
+			// Polling
+			// ---------------------------------------------------------------------------
+
+			function startPolling() {
+				stopPolling()
+				const intervalMs = parseInt(document.getElementById("inp-interval").value) || 1000
+				pollTimer = setInterval(async () => {
+					if (!player) return
+					try {
+						const report = await player.getStats()
+						renderStats(report, lastReport)
+						lastReport = report
+						lastReportTs = performance.now()
+					} catch (e) {
+						pollStatusEl.textContent = "getStats() error: " + e.message
+					}
+				}, intervalMs)
+			}
+
+			function stopPolling() {
+				if (pollTimer !== null) {
+					clearInterval(pollTimer)
+					pollTimer = null
+				}
+			}
+
+			// ---------------------------------------------------------------------------
+			// Player lifecycle
+			// ---------------------------------------------------------------------------
+
+			async function startPlayer() {
+				if (player) await stopPlayer()
+
+				const url = document.getElementById("inp-url").value.trim()
+				const namespace = document.getElementById("inp-ns").value.trim()
+				if (!url || !namespace) { setStatus("URL and namespace are required."); return }
+
+				setStatus("Connecting…")
+				try {
+					player = await Player.create({ url, namespace, canvas })
+					player.addEventListener("error", (e) => setStatus("Error: " + e.detail?.message))
+					player.addEventListener("play",  () => setStatus("Playing"))
+					player.addEventListener("pause", () => setStatus("Paused"))
+					await player.play()
+					startPolling()
+				} catch (e) {
+					setStatus("Failed: " + e.message)
+					player = null
+				}
+			}
+
+			async function stopPlayer() {
+				stopPolling()
+				if (player) {
+					await player.close()
+					player = null
+				}
+				lastReport = null
+				setStatus("Stopped.")
+				statsPanel.innerHTML = '<div style="color:#555;font-size:0.75rem">Stopped.</div>'
+			}
+
+			document.getElementById("btn-play").addEventListener("click",  startPlayer)
+			document.getElementById("btn-pause").addEventListener("click", () => player?.pause())
+			document.getElementById("btn-stop").addEventListener("click",  stopPlayer)
+
+			// ---------------------------------------------------------------------------
+			// Stats rendering
+			// ---------------------------------------------------------------------------
+
+			function fmt(v) {
+				if (v === undefined || v === null) return "—"
+				if (typeof v === "number") {
+					if (!isFinite(v)) return "—"
+					return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2)
+				}
+				return String(v)
+			}
+
+			function rate(nowVal, prevVal, dtMs) {
+				if (prevVal === undefined || dtMs <= 0) return undefined
+				return ((nowVal - prevVal) / dtMs) * 1000
+			}
+
+			function renderStats(report, prev) {
+				const dtMs = prev ? performance.now() - lastReportTs : 0
+				const sections = []
+
+				// Build a lookup for the previous snapshot.
+				const prevMap = prev ? prev : new Map()
+
+				for (const [id, stat] of report) {
+					const prevStat = prevMap.get(id)
+					const rows = []
+
+					switch (stat.type) {
+						case "session":
+							rows.push(["state", stat.state])
+							rows.push(["uptime", fmt(stat.uptimeMs / 1000) + " s"])
+							rows.push(["play time", fmt(stat.playMs / 1000) + " s"])
+							rows.push(["ttff", stat.ttffMs !== undefined ? fmt(stat.ttffMs) + " ms" : "—"])
+							if (stat.lastErrorMessage) rows.push(["last error", stat.lastErrorMessage, true])
+							break
+
+						case "transport":
+							rows.push(["control bytes rx", fmt(stat.controlBytesReceived)])
+							rows.push(["control bytes tx", fmt(stat.controlBytesSent)])
+							rows.push(["control msgs rx", fmt(stat.controlMessagesReceived)])
+							rows.push(["control msgs tx", fmt(stat.controlMessagesSent)])
+							rows.push(["streams in", fmt(stat.streamsOpenedIn)])
+							rows.push(["active subs", fmt(stat.activeSubscriptions)])
+							rows.push(["connect dial", stat.connectDialMs !== undefined ? fmt(stat.connectDialMs) + " ms" : "—"])
+							rows.push(["setup RTT", stat.setupRoundtripMs !== undefined ? fmt(stat.setupRoundtripMs) + " ms" : "—"])
+							rows.push(["uptime", fmt(stat.connectionUptimeMs / 1000) + " s"])
+							break
+
+						case "inbound-track":
+							rows.push(["track", stat.trackName])
+							rows.push(["namespace", stat.namespace])
+							rows.push(["sub latency", stat.subscribeLatencyMs !== undefined ? fmt(stat.subscribeLatencyMs) + " ms" : "—"])
+							rows.push(["groups rx", fmt(stat.groupsReceivedTotal)])
+							rows.push(["objects rx", fmt(stat.objectsReceivedTotal)])
+							{
+								const r = rate(stat.objectsReceivedTotal, prevStat?.objectsReceivedTotal, dtMs)
+								if (r !== undefined) rows.push(["objects/s", fmt(r)])
+							}
+							rows.push(["jitter", fmt(stat.interArrivalJitterMs) + " ms"])
+							rows.push(["publish done", fmt(stat.publishDoneTotal)])
+							rows.push(["errors", fmt(stat.errorTotal), stat.errorTotal > 0])
+							break
+
+						case "video-decoder":
+							rows.push(["codec", stat.currentCodec ?? "—"])
+							rows.push(["resolution", stat.currentWidth && stat.currentHeight ? `${stat.currentWidth}×${stat.currentHeight}` : "—"])
+							rows.push(["frames submitted", fmt(stat.framesSubmittedTotal)])
+							rows.push(["frames decoded", fmt(stat.framesDecodedTotal)])
+							rows.push(["decode queue", fmt(stat.decodeQueueSize)])
+							rows.push(["decode latency", fmt(stat.decodeLatencyMsEwma) + " ms"])
+							rows.push(["dropped (keyframe wait)", fmt(stat.framesDroppedWaitingKeyframeTotal)])
+							rows.push(["configures", fmt(stat.configuresTotal)])
+							rows.push(["resets", fmt(stat.resetsTotal)])
+							rows.push(["errors", fmt(stat.errorsTotal), stat.errorsTotal > 0])
+							break
+
+						case "audio-decoder":
+							rows.push(["codec", stat.currentCodec ?? "—"])
+							rows.push(["sample rate", stat.currentSampleRate ? stat.currentSampleRate + " Hz" : "—"])
+							rows.push(["channels", fmt(stat.currentChannels)])
+							rows.push(["frames decoded", fmt(stat.framesDecodedTotal)])
+							rows.push(["samples decoded", fmt(stat.samplesDecodedTotal)])
+							rows.push(["samples dropped", fmt(stat.samplesDroppedTotal), stat.samplesDroppedTotal > 0])
+							rows.push(["decode latency", fmt(stat.decodeLatencyMsEwma) + " ms"])
+							rows.push(["errors", fmt(stat.errorsTotal), stat.errorsTotal > 0])
+							break
+
+						case "video-render":
+							rows.push(["frames rendered", fmt(stat.framesRenderedTotal)])
+							rows.push(["fps (ewma)", fmt(stat.framesPerSecondEwma)])
+							rows.push(["dropped stale", fmt(stat.framesDroppedStaleTotal)])
+							rows.push(["dropped slow", fmt(stat.framesDroppedSlowTotal)])
+							rows.push(["dropped sink", fmt(stat.framesDroppedSinkTotal)])
+							rows.push(["dropped keyframe wait", fmt(stat.framesDroppedWaitingKeyframeTotal)])
+							rows.push(["freezes", fmt(stat.freezeCountTotal), stat.freezeCountTotal > 0])
+							rows.push(["freeze duration", fmt(stat.freezeDurationMsTotal) + " ms", stat.freezeDurationMsTotal > 0])
+							rows.push(["keyframes rx", fmt(stat.keyframesReceivedTotal)])
+							rows.push(["keyframe interval", fmt(stat.keyframeIntervalMsEwma) + " ms"])
+							rows.push(["segment seq", fmt(stat.currentSegmentSequence)])
+							rows.push(["timeline depth", fmt(stat.timelineBufferDepth)])
+							break
+
+						case "audio-playback":
+							rows.push(["underruns", fmt(stat.underrunCountTotal), stat.underrunCountTotal > 0])
+							rows.push(["underrun expected", fmt(stat.underrunSamplesExpectedTotal)])
+							rows.push(["underrun got", fmt(stat.underrunSamplesGotTotal)])
+							rows.push(["ring fill", fmt(stat.ringFillSamples) + " / " + fmt(stat.ringCapacitySamples)])
+							rows.push(["context state", stat.audioContextState])
+							break
+
+						case "timeline":
+							rows.push(["enqueued", fmt(stat.segmentsEnqueuedTotal)])
+							rows.push(["dequeued", fmt(stat.segmentsDequeuedTotal)])
+							rows.push(["dropped stale", fmt(stat.segmentsDroppedStaleTotal)])
+							rows.push(["dropped slow", fmt(stat.segmentsDroppedSlowTotal)])
+							rows.push(["buffer depth", fmt(stat.bufferDepth)])
+							break
+
+						case "codec":
+							rows.push(["kind", stat.kind])
+							rows.push(["codec", stat.codec])
+							rows.push(["mime", stat.mimeType])
+							if (stat.width) rows.push(["size", `${stat.width}×${stat.height}`])
+							if (stat.framerate) rows.push(["fps", fmt(stat.framerate)])
+							if (stat.samplerate) rows.push(["sample rate", stat.samplerate + " Hz"])
+							if (stat.channels) rows.push(["channels", fmt(stat.channels)])
+							if (stat.bitrate) rows.push(["bitrate", fmt(stat.bitrate) + " bps"])
+							break
+
+						default:
+							continue
+					}
+
+					if (rows.length > 0) {
+						sections.push({ title: `[${stat.type}] ${id}`, rows })
+					}
+				}
+
+				if (sections.length === 0) {
+					statsPanel.innerHTML = '<div style="color:#555">No stats yet.</div>'
+					return
+				}
+
+				statsPanel.innerHTML = sections.map(({ title, rows }) => `
+					<div class="stat-section">
+						<div class="stat-section-title">${title}</div>
+						${rows.map(([k, v, alert]) => `
+							<div class="stat-row">
+								<span class="stat-key">${k}</span>
+								<span class="stat-val${alert ? " alert" : ""}">${v}</span>
+							</div>`).join("")}
+					</div>`).join("")
+
+				pollStatusEl.textContent = `Last update: ${new Date().toLocaleTimeString()} | entries: ${report.size}`
+			}
+		</script>
+	</body>
+</html>

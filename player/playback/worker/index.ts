@@ -5,6 +5,7 @@ import * as Video from "./video"
 
 import * as MP4 from "@moq-js/media"
 import * as Message from "./message"
+import { WorkerStats } from "./stats"
 import { asError, Deferred, SubgroupReader, ReadableStreamBuffer, getWorkerLogger, setWorkerLogLevel } from "@moq-js/transport"
 
 const log = getWorkerLogger()
@@ -37,6 +38,9 @@ class Worker {
 	// Timeline receives samples, buffering them and choosing the timestamp to render.
 	#timeline = new Timeline()
 
+	// Shared stats collector for this worker instance.
+	#stats = new WorkerStats()
+
 	// A map of init tracks.
 	#inits = new Map<string, Deferred<Uint8Array>>()
 
@@ -53,7 +57,7 @@ class Worker {
 		} else if (msg.config) {
 			this.#onConfig(msg.config)
 		} else if (msg.init) {
-			// TODO buffer the init segment so we don't hold the stream open.
+			// TODO(itzmanish): buffer the init segment so we don't hold the stream open.
 			this.#onInit(msg.init)
 		} else if (msg.segment) {
 			this.#onSegment(msg.segment).catch((e) => log.warn("onSegment failed", e))
@@ -61,18 +65,29 @@ class Worker {
 			this.#onPause(msg.play)
 		} else if (msg.play === true) {
 			this.#onPlay(msg.play)
+		} else if (msg.getStats) {
+			this.#onGetStats(msg.getStats.requestId)
 		} else {
 			throw new Error(`unknown message: + ${JSON.stringify(msg)}`)
 		}
 	}
 
+	#onGetStats(requestId: number): void {
+		// Sync timeline drop counters from Component instances before snapshot.
+		this.#stats.syncTimelineCounters(this.#timeline.video, this.#timeline.audio)
+		const nowMs = performance.now()
+		const entries = this.#stats.collect(nowMs)
+		const reply: Message.FromWorker = { stats: { requestId, entries } }
+		postMessage(reply)
+	}
+
 	#onConfig(msg: Message.Config) {
 		if (msg.audio) {
-			this.#audio = new Audio.Renderer(msg.audio, this.#timeline.audio)
+			this.#audio = new Audio.Renderer(msg.audio, this.#timeline.audio, this.#stats.audio)
 		}
 
 		if (msg.video) {
-			this.#video = new Video.Renderer(msg.video, this.#timeline.video)
+			this.#video = new Video.Renderer(msg.video, this.#timeline.video, this.#stats.video)
 		}
 	}
 
@@ -113,6 +128,7 @@ class Worker {
 			frames: queue.readable,
 		})
 		segments.releaseLock()
+		this.#stats.timeline.segmentsEnqueuedTotal++
 
 		// Tracks whether the per-segment writable became un-usable mid-stream.
 		// The timeline can cancel the readable side of `queue` when it decides
@@ -129,14 +145,23 @@ class Worker {
 					break
 				}
 
-				objectCount += 1
+			objectCount += 1
 
-				if (!(chunk.object_payload instanceof Uint8Array)) {
-					throw new Error(`invalid payload: ${chunk.object_payload}`)
-				}
+			if (!(chunk.object_payload instanceof Uint8Array)) {
+				throw new Error(`invalid payload: ${chunk.object_payload}`)
+			}
 
-				const frames = container.decode(chunk.object_payload)
-				frameCount += frames.length
+			// Accumulate payload bytes and object counts into the shared stats.
+			if (msg.kind === "video") {
+				this.#stats.objectsReceivedVideoTotal++
+				this.#stats.payloadBytesVideoTotal += chunk.object_payload.byteLength
+			} else {
+				this.#stats.objectsReceivedAudioTotal++
+				this.#stats.payloadBytesAudioTotal += chunk.object_payload.byteLength
+			}
+
+			const frames = container.decode(chunk.object_payload)
+			frameCount += frames.length
 
 				if (msg.kind === "video" && !firstVideoFrameLogged && frames.length > 0) {
 					const first = frames[0]
@@ -256,8 +281,3 @@ self.addEventListener("message", (msg) => {
 		log.warn("worker error:", err)
 	}
 })
-
-// Validates this is an expected message
-function _send(msg: Message.FromWorker) {
-	postMessage(msg)
-}

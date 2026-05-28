@@ -220,9 +220,15 @@ export namespace ObjectDatagram {
 
 export class Objects {
 	private quic: WebTransport
+	#stats?: import("./stats").TransportStats
 
 	constructor(quic: WebTransport) {
 		this.quic = quic
+	}
+
+	/** Attach a stats collector (called by Connection after construction). */
+	attachStats(stats: import("./stats").TransportStats): void {
+		this.#stats = stats
 	}
 
 	async send(h: ObjectDatagram | SubgroupHeader): Promise<TrackWriter | SubgroupWriter> {
@@ -292,7 +298,8 @@ export class Objects {
 
 			log.trace("parsed subgroup header", h)
 
-			return new SubgroupReader(h, r)
+			this.#stats?.onStreamAccepted()
+		return new SubgroupReader(h, r)
 		} catch (e) {
 			// Not a subgroup type, might be datagram or other type
 			log.warn("unknown stream type", type)

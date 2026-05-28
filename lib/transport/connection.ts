@@ -3,6 +3,8 @@ import { Objects } from "./objects"
 import { asError } from "../common/error"
 import { ControlStream } from "./stream"
 import { getLogger } from "../common/logger"
+import { TransportStats } from "./stats"
+import type { MoqStatsReport } from "../common/stats"
 
 import { Publisher } from "./publisher"
 import { Subscriber } from "./subscriber"
@@ -33,13 +35,22 @@ export class Connection {
 	// the session is already closed, so we make close() idempotent.
 	#closed = false
 
-	constructor(quic: WebTransport, stream: ControlStream, objects: Objects) {
+	// Shared stats collector; also exposed on Subscriber for per-track hooks.
+	#stats: TransportStats
+
+	constructor(quic: WebTransport, stream: ControlStream, objects: Objects, stats?: TransportStats) {
 		this.#quic = quic
 		this.#controlStream = stream
 		this.#objects = objects
+		this.#stats = stats ?? new TransportStats()
+		// Record the moment the connection is live.
+		this.#stats.onConnected(performance.now())
+		// Wire stats into the sub-components that write to it.
+		this.#controlStream.attachStats(this.#stats)
+		this.#objects.attachStats(this.#stats)
 
 		this.#publisher = new Publisher(this.#controlStream, this.#objects)
-		this.#subscriber = new Subscriber(this.#controlStream, this.#objects)
+		this.#subscriber = new Subscriber(this.#controlStream, this.#objects, this.#stats)
 
 		this.#running = this.#run()
 	}
@@ -79,6 +90,16 @@ export class Connection {
 
 	subscribed() {
 		return this.#publisher.subscribed()
+	}
+
+	/**
+	 * Synchronously snapshot transport-level stats into a new `MoqStatsReport`.
+	 * The caller may pass an existing report to merge into it.
+	 */
+	getStats(report?: MoqStatsReport): MoqStatsReport {
+		const r = report ?? new Map()
+		this.#stats.collect(r, performance.now())
+		return r
 	}
 
 	async #runControl() {
@@ -137,6 +158,7 @@ export class Connection {
 			} else if (this.#publisher.hasOutstandingRequest(id)) {
 				await this.#publisher.recv(msg)
 			} else {
+				this.#stats.onUnknownRequestError()
 				throw new Error(`response for unknown request: ${id}`)
 			}
 		} else if (Control.isPublisher(msg.type)) {

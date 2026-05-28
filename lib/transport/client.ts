@@ -8,6 +8,7 @@ import { Parameters } from "./base_data"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer } from "./buffer"
 import { RequestId, maxRequestIdFromParams } from "./request_id"
 import { getLogger } from "../common/logger"
+import { TransportStats } from "./stats"
 
 const log = getLogger()
 
@@ -45,9 +46,15 @@ export class Client {
 		const fingerprint = await this.#fingerprint
 		const options = webTransportOptions(fingerprint, this.config.webTransportProtocols)
 
+		const stats = new TransportStats()
+		const dialStart = performance.now()
+
 		const quic = new WebTransport(this.config.url, options)
 		await quic.ready
 
+		stats.onDialComplete(performance.now() - dialStart)
+
+		const setupStart = performance.now()
 		const stream = await quic.createBidirectionalStream({ sendOrder: Number.MAX_SAFE_INTEGER })
 
 		const buffer = new ReadableWritableStreamBuffer(stream.readable, stream.writable)
@@ -65,13 +72,15 @@ export class Client {
 		// 	throw new Error(`unsupported server version: ${server.version}`)
 		// }
 
+		stats.onSetupComplete(performance.now() - setupStart)
+
 		const control = new Stream.ControlStream(
 			buffer,
 			RequestId.client(maxRequestIdFromParams(server.params), maxRequestIdFromParams(setupParams)),
 		)
 		const objects = new Objects(quic)
 
-		return new Connection(quic, control, objects)
+		return new Connection(quic, control, objects, stats)
 	}
 
 	async #fetchFingerprint(url?: string): Promise<WebTransportHash | undefined> {

@@ -7,6 +7,8 @@ import { ControlStream } from "./stream"
 import { SubgroupReader } from "./subgroup"
 import { ParameterType } from "./base_data"
 import { getLogger } from "../common/logger"
+import type { TransportStats } from "./stats"
+import type { InboundTrackStats } from "./stats"
 
 const log = getLogger()
 
@@ -29,6 +31,9 @@ export class Subscriber {
 	// Use to send objects.
 	#objects: Objects
 
+	// Optional stats collector shared with the owning Connection.
+	#stats?: TransportStats
+
 	// Announced broadcasts.
 	#publishedNamespaces = new Map<string, PublishNamespaceRecv>()
 	#publishedNamespacesQueue = new Watch<PublishNamespaceRecv[]>([])
@@ -38,6 +43,10 @@ export class Subscriber {
 	#trackAliasMap = new Map<bigint, bigint>() // Maps request ID to track alias
 	#aliasToSubscriptionMap = new Map<bigint, bigint>() // Maps track alias to subscription ID
 	#pendingTrack = new Map<bigint, (id: bigint) => Promise<void>>()
+	// Maps request id → InboundTrackStats for subscribe latency and per-object hooks.
+	#trackStatsByRequestId = new Map<bigint, InboundTrackStats>()
+	// Maps track alias → InboundTrackStats (set on SUBSCRIBE_OK, used in recvObject).
+	#trackStatsByAlias = new Map<bigint, InboundTrackStats>()
 
 	#dropSubscribe(id: bigint): SubscribeSend | undefined {
 		const subscribe = this.#subscribe.get(id)
@@ -51,6 +60,14 @@ export class Subscriber {
 		if (trackAlias !== undefined) {
 			this.#trackAliasMap.delete(id)
 			this.#aliasToSubscriptionMap.delete(trackAlias)
+			this.#trackStatsByAlias.delete(trackAlias)
+		}
+
+		// Drop the per-subscription stat entry so it doesn't accumulate under churn.
+		const trackStatEntry = this.#trackStatsByRequestId.get(id)
+		if (trackStatEntry) {
+			this.#trackStatsByRequestId.delete(id)
+			this.#stats?.onSubscriptionDropped(trackStatEntry.id)
 		}
 
 		const mappedId = this.#trackToIDMap.get(subscribe.track)
@@ -61,9 +78,10 @@ export class Subscriber {
 		return subscribe
 	}
 
-	constructor(control: ControlStream, objects: Objects) {
+	constructor(control: ControlStream, objects: Objects, stats?: TransportStats) {
 		this.#control = control
 		this.#objects = objects
+		this.#stats = stats
 	}
 
 	publishedNamespaces(): Watch<PublishNamespaceRecv[]> {
@@ -142,6 +160,14 @@ export class Subscriber {
 		})
 		this.#subscribe.set(id, subscribe)
 
+		// Register subscribe latency timer and inbound-track stat entry.
+		if (this.#stats) {
+			// Derive kind from track name convention: ".m4s" suffix = media, ".catalog" = data.
+			const kind = track.endsWith(".m4s") ? "video/audio" : track === ".catalog" ? "data" : "unknown"
+			const trackStats = this.#stats.onSubscribe(id, track, namespace, kind, performance.now())
+			this.#trackStatsByRequestId.set(id, trackStats)
+		}
+
 		this.#trackToIDMap.set(track, id)
 
 		const params = new Map<bigint, Uint8Array | bigint>()
@@ -212,6 +238,16 @@ export class Subscriber {
 		this.#trackAliasMap.set(msg.id, msg.track_alias)
 		// Also create reverse mapping for receiving objects
 		this.#aliasToSubscriptionMap.set(msg.track_alias, msg.id)
+
+		// Record subscribe latency and wire alias → stats for per-object hooks.
+		if (this.#stats) {
+			this.#stats.onSubscribeOk(msg.id, performance.now())
+			const trackStats = this.#trackStatsByRequestId.get(msg.id)
+			if (trackStats) {
+				this.#trackStatsByAlias.set(msg.track_alias, trackStats)
+			}
+		}
+
 		const callback = this.#pendingTrack.get(msg.track_alias)
 		if (callback) {
 			this.#pendingTrack.delete(msg.track_alias)
@@ -223,6 +259,7 @@ export class Subscriber {
 	}
 
 	async recvRequestError(msg: Control.RequestError) {
+		this.#stats?.onSubscribeError(msg.id)
 		const subscribe = this.#dropSubscribe(msg.id)
 		if (!subscribe) {
 			throw new Error(`request error for unknown id: ${msg.id}`)
@@ -232,6 +269,10 @@ export class Subscriber {
 	}
 
 	async recvPublishDone(msg: Control.PublishDone) {
+		// Record publishDone before dropping the entry so the stat is captured.
+		const trackStats = this.#trackStatsByRequestId.get(msg.id)
+		if (trackStats) this.#stats?.onSubscribeDone(trackStats.id)
+
 		const subscribe = this.#dropSubscribe(msg.id)
 		if (!subscribe) {
 			// This can arrive after we locally sent UNSUBSCRIBE and dropped the subscription.
@@ -246,6 +287,12 @@ export class Subscriber {
 		log.trace("recvObject", reader)
 		// Get track alias from reader header
 		const track_alias = reader.header.track_alias
+
+		// Record per-track stream arrival for stats.
+		const trackStats = this.#trackStatsByAlias.get(track_alias)
+		if (trackStats) {
+			trackStats.onStreamArrived(performance.now())
+		}
 
 		// Map track alias back to subscription ID
 		const subscriptionId = this.#aliasToSubscriptionMap.get(track_alias)

@@ -2,8 +2,12 @@ import { Frame, Component } from "./timeline"
 import * as MP4 from "@moq-js/media"
 import * as Message from "./message"
 import { getWorkerLogger } from "@moq-js/transport"
+import type { VideoStats } from "./stats"
 
 const log = getWorkerLogger()
+
+// Freeze threshold: gap larger than this (ms) while playing triggers a freeze.
+const FREEZE_THRESHOLD_MS = 150
 
 interface DecoderConfig {
 	codec: string
@@ -24,6 +28,7 @@ interface DecoderConfig {
 export class Renderer {
 	#canvas: OffscreenCanvas
 	#timeline: Component
+	#stats?: VideoStats
 
 	#decoder!: VideoDecoder
 	#queue: TransformStream<Frame, VideoFrame>
@@ -32,10 +37,13 @@ export class Renderer {
 	#waitingForKeyframe: boolean = true
 	#paused: boolean
 	#hasSentWaitingForKeyFrameEvent: boolean = false
+	// Set to true after the very first frame is drawn; used to post firstFrameRendered.
+	#firstFrameSent = false
 
-	constructor(config: Message.ConfigVideo, timeline: Component) {
+	constructor(config: Message.ConfigVideo, timeline: Component, stats?: VideoStats) {
 		this.#canvas = config.canvas
 		this.#timeline = timeline
+		this.#stats = stats
 		this.#paused = false
 
 		this.#queue = new TransformStream({
@@ -62,8 +70,23 @@ export class Renderer {
 		const reader = this.#timeline.frames.pipeThrough(this.#queue).getReader()
 		for (;;) {
 			const { value: frame, done } = await reader.read()
-			if (this.#paused) continue
 			if (done) break
+
+			// If paused, discard the frame immediately to avoid accumulating
+			// VideoFrame objects that are never closed (GPU memory leak).
+			if (this.#paused) {
+				frame.close()
+				continue
+			}
+
+			const nowMs = performance.now()
+			this.#stats?.onFrameReceived(false /* isKeyframe tracked in #transform */, nowMs)
+
+			// Freeze detection: if the gap since the last render exceeds the threshold
+			// while playing, mark a freeze start (recovered in onFrameRendered).
+			if (this.#stats) {
+				this.#stats.onFrameRendered(nowMs, true /* isPlaying */)
+			}
 
 			self.requestAnimationFrame(() => {
 				this.#canvas.width = frame.displayWidth
@@ -74,6 +97,12 @@ export class Renderer {
 
 				ctx.drawImage(frame, 0, 0, frame.displayWidth, frame.displayHeight) // TODO respect aspect ratio
 				frame.close()
+
+				// Notify main thread the first time a frame is rendered (for ttff).
+				if (!this.#firstFrameSent) {
+					this.#firstFrameSent = true
+					postMessage({ firstFrameRendered: true })
+				}
 			})
 		}
 	}
@@ -81,9 +110,14 @@ export class Renderer {
 	#start(controller: TransformStreamDefaultController<VideoFrame>) {
 		this.#decoder = new VideoDecoder({
 			output: (frame: VideoFrame) => {
+				this.#stats?.onDecodeOutput(performance.now())
+				this.#stats?.updateDecodeQueueSize(this.#decoder.decodeQueueSize)
 				controller.enqueue(frame)
 			},
-			error: (e) => log.error("video decoder error", e),
+			error: (e) => {
+				log.error("video decoder error", e)
+				if (this.#stats) this.#stats.errorsTotal++
+			},
 		})
 	}
 
@@ -106,6 +140,7 @@ export class Renderer {
 				if (configMismatch) {
 					this.#decoder.reset()
 					this.#decoderConfig = undefined
+					if (this.#stats) this.#stats.resetsTotal++
 				}
 			}
 		}
@@ -133,8 +168,15 @@ export class Renderer {
 			try {
 				this.#decoder.configure(this.#decoderConfig)
 				log.debug("decoder configured", { codec: track.codec, state: this.#decoder.state })
+				if (this.#stats) {
+					this.#stats.configuresTotal++
+					this.#stats.currentCodec = track.codec
+					this.#stats.currentWidth = track.video.width
+					this.#stats.currentHeight = track.video.height
+				}
 			} catch (e) {
 				log.error("failed to configure decoder", e)
+				if (this.#stats) this.#stats.errorsTotal++
 				return // Stop processing if configure fails
 			}
 			if (!frame.sample.is_sync) {
@@ -148,6 +190,7 @@ export class Renderer {
 		if (this.#decoder.state == "configured") {
 			if (this.#waitingForKeyframe && !frame.sample.is_sync) {
 				log.warn("skipping non-keyframe until a keyframe is found")
+				if (this.#stats) this.#stats.framesDroppedWaitingKeyframeTotal++
 				if (!this.#hasSentWaitingForKeyFrameEvent) {
 					self.postMessage("waitingforkeyframe")
 					this.#hasSentWaitingForKeyFrameEvent = true
@@ -159,6 +202,8 @@ export class Renderer {
 			if (frame.sample.is_sync) {
 				this.#waitingForKeyframe = false
 				this.#hasSentWaitingForKeyFrameEvent = false
+				// Record keyframe for keyframe-interval stats.
+				if (this.#stats) this.#stats.onFrameReceived(true, performance.now())
 			}
 
 			const chunk = new EncodedVideoChunk({
@@ -169,9 +214,12 @@ export class Renderer {
 
 			log.trace("decoding chunk", { type: chunk.type, size: chunk.byteLength })
 			try {
+				this.#stats?.onDecodeSubmit(performance.now())
+				this.#stats?.updateDecodeQueueSize(this.#decoder.decodeQueueSize)
 				this.#decoder.decode(chunk)
 			} catch (e) {
 				log.error("failed to decode chunk", e)
+				if (this.#stats) this.#stats.errorsTotal++
 			}
 		}
 	}

@@ -1,18 +1,28 @@
-// TODO add support for @/ to avoid relative imports
+// TODO(itzmanish): add support for @/ to avoid relative imports
 import { Ring } from "../../common/ring"
 import * as Message from "./message"
 import { getWorkletLogger, setWorkletLogLevel } from "@moq-js/transport"
+import type { AudioPlaybackStat } from "@moq-js/transport"
 
 class Renderer extends AudioWorkletProcessor {
 	ring?: Ring
 	base: number
 	// log is initialised in the constructor once `this.port` is available.
 	#log!: ReturnType<typeof getWorkletLogger>
+
+	// Log-throttling counters (reset after each log emit — do not use for stats).
 	#processCount = 0
 	#lastUnderrunLogProcess = 0
 	#underrunCount = 0
 	#underrunExpected = 0
 	#underrunGot = 0
+
+	// Cumulative stats counters (never reset — safe to snapshot at any time).
+	#totalUnderrunCount = 0
+	#totalUnderrunSamplesExpected = 0
+	#totalUnderrunSamplesGot = 0
+	#totalSamplesWritten = 0   // updated via message from worker (not tracked here)
+	#totalSamplesDropped = 0   // same as above
 
 	constructor() {
 		// The super constructor call is required.
@@ -29,11 +39,39 @@ class Renderer extends AudioWorkletProcessor {
 			setWorkletLogLevel(msg.logLevel)
 		} else if (msg.config) {
 			this.onConfig(msg.config)
+		} else if (msg.getStats) {
+			this.onGetStats(msg.getStats.requestId)
 		}
 	}
 
 	onConfig(config: Message.Config) {
 		this.ring = new Ring(config.ring)
+	}
+
+	onGetStats(requestId: number): void {
+		const ringFill = this.ring ? this.ring.size() : 0
+		const ringCapacity = this.ring ? this.ring.capacity : 0
+
+		const entry: AudioPlaybackStat = {
+			id: "render:audio",
+			type: "audio-playback",
+			timestamp: currentTime * 1000, // AudioWorkletProcessor.currentTime is in seconds
+			// samplesWrittenTotal / samplesDroppedTotal come from the worker-side audio renderer;
+			// the worklet only reads from the ring, so we report 0 here and the worker-side
+			// AudioStats has the correct values.
+			samplesWrittenTotal: 0,
+			samplesDroppedTotal: 0,
+			underrunCountTotal: this.#totalUnderrunCount,
+			underrunSamplesExpectedTotal: this.#totalUnderrunSamplesExpected,
+			underrunSamplesGotTotal: this.#totalUnderrunSamplesGot,
+			ringFillSamples: ringFill,
+			ringCapacitySamples: ringCapacity,
+			// AudioWorkletGlobalScope does not have access to AudioContext.state
+			audioContextState: "running",
+		}
+
+		const reply: Message.WorkletStatsMessage = { stats: { requestId, entry } }
+		this.port.postMessage(reply)
 	}
 
 	// Inputs and outputs in groups of 128 samples.
@@ -61,9 +99,18 @@ class Renderer extends AudioWorkletProcessor {
 
 		const size = this.ring.read(output)
 		if (size < output.length) {
+			const underrunExpected = output.length
+			const underrunGot = size
+
+			// Update log-throttling counters (reset after emit).
 			this.#underrunCount += 1
-			this.#underrunExpected += output.length
-			this.#underrunGot += size
+			this.#underrunExpected += underrunExpected
+			this.#underrunGot += underrunGot
+
+			// Update cumulative counters (never reset).
+			this.#totalUnderrunCount += 1
+			this.#totalUnderrunSamplesExpected += underrunExpected
+			this.#totalUnderrunSamplesGot += underrunGot
 
 			// Avoid flooding postMessage/console from the realtime audio thread. At 48kHz with
 			// 128-frame render quanta this logs at most about once every 650ms.
@@ -78,7 +125,7 @@ class Renderer extends AudioWorkletProcessor {
 				this.#underrunExpected = 0
 				this.#underrunGot = 0
 			}
-			// TODO trigger rebuffering event
+			// TODO(itzmanish): trigger rebuffering event
 		}
 
 		return true

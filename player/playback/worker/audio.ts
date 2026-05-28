@@ -3,6 +3,7 @@ import { Ring } from "../../common/ring"
 import { Component, Frame } from "./timeline"
 import * as MP4 from "@moq-js/media"
 import { getWorkerLogger } from "@moq-js/transport"
+import type { AudioStats } from "./stats"
 
 const log = getWorkerLogger()
 
@@ -10,15 +11,18 @@ const log = getWorkerLogger()
 export class Renderer {
 	#ring: Ring
 	#timeline: Component
+	#stats?: AudioStats
 
 	#decoder!: AudioDecoder
 	#stream: TransformStream<Frame, AudioData>
+	// Cumulative dropped samples since construction. Kept for log throttling.
 	#droppedSamples = 0
 	#lastDroppedSamplesLog = 0
 
-	constructor(config: Message.ConfigAudio, timeline: Component) {
+	constructor(config: Message.ConfigAudio, timeline: Component, stats?: AudioStats) {
 		this.#timeline = timeline
 		this.#ring = new Ring(config.ring)
+		this.#stats = stats
 
 		this.#stream = new TransformStream({
 			start: this.#start.bind(this),
@@ -31,9 +35,15 @@ export class Renderer {
 	#start(controller: TransformStreamDefaultController) {
 		this.#decoder = new AudioDecoder({
 			output: (frame: AudioData) => {
+				if (this.#stats) {
+					this.#stats.onDecodeOutput(frame.numberOfFrames, performance.now())
+				}
 				controller.enqueue(frame)
 			},
-			error: (e) => log.warn("audio decoder error", e),
+			error: (e: unknown) => {
+				log.warn("audio decoder error", e)
+				if (this.#stats) this.#stats.errorsTotal++
+			},
 		})
 	}
 
@@ -52,8 +62,15 @@ export class Renderer {
 					numberOfChannels: track.audio.channel_count,
 				})
 				log.debug("decoder configured", { label, codec: track.codec })
+				if (this.#stats) {
+					this.#stats.configuresTotal++
+					this.#stats.currentCodec = track.codec
+					this.#stats.currentSampleRate = track.audio.sample_rate
+					this.#stats.currentChannels = track.audio.channel_count
+				}
 			} catch (error) {
 				log.warn("decoder configure failed", { label, error })
+				if (this.#stats) this.#stats.errorsTotal++
 				return
 			}
 		}
@@ -65,6 +82,7 @@ export class Renderer {
 			data: frame.sample.data,
 		})
 
+		this.#stats?.onDecodeSubmit(performance.now())
 		this.#decoder.decode(chunk)
 	}
 
@@ -78,8 +96,16 @@ export class Renderer {
 			// Write audio samples to the ring buffer, dropping when there's no space.
 			const written = this.#ring.write(frame)
 
+			// AudioData must always be explicitly closed to release its underlying
+			// resources. Do this after ring.write so the data is copied first.
+			frame.close()
+
+			this.#stats?.onSamplesWritten(written)
+
 			if (written < frame.numberOfFrames) {
-				this.#droppedSamples += frame.numberOfFrames - written
+				const dropped = frame.numberOfFrames - written
+				this.#droppedSamples += dropped
+				this.#stats?.onSamplesDropped(dropped)
 				// This can be noisy during startup/rebuffering. Keep it at trace and aggregate so
 				// debug logging remains usable in demos.
 				if (this.#droppedSamples - this.#lastDroppedSamplesLog >= 9600) {

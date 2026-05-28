@@ -22,6 +22,30 @@ export { Queue, Watch, Notify, Deferred } from "../common/async"
 export type { WatchNext } from "../common/async"
 export { sleep } from "./utils"
 
+// Stats — types shared across packages + transport-layer collector
+export { TransportStats } from "./stats"
+export type { InboundTrackStats } from "./stats"
+
+// Stats types — shared across transport, player, and publisher
+export type {
+	MoqStat,
+	MoqStatsReport,
+	MoqStatType,
+	MoqStatBase,
+	SessionStat,
+	SessionState,
+	TransportStat,
+	ControlStreamStat,
+	InboundTrackStat,
+	VideoDecoderStat,
+	AudioDecoderStat,
+	VideoRenderStat,
+	AudioPlaybackStat,
+	TimelineStat,
+	CodecStat,
+} from "../common/stats"
+export { Ewma, Jitter, LatencyRing } from "../common/stats"
+
 // Logger — full surface exported so consumers call setGlobalLogger from here
 export {
 	getLogger,

@@ -28,6 +28,7 @@ import { debug } from "./utils"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } from "./buffer"
 import { RequestId } from "./request_id"
 import { getLogger } from "../common/logger"
+import type { TransportStats } from "./stats"
 
 const log = getLogger()
 
@@ -35,18 +36,31 @@ export class ControlStream {
 	private decoder: Decoder
 	private encoder: Encoder
 	#requestId: RequestId
+	#stats?: TransportStats
 
 	#mutex = Promise.resolve()
 
-	constructor(c: ReadableWritableStreamBuffer, requestId = RequestId.client(0n, 0n)) {
+	constructor(c: ReadableWritableStreamBuffer, requestId = RequestId.client(0n, 0n), stats?: TransportStats) {
 		this.decoder = new Decoder(c)
 		this.encoder = new Encoder(c)
 		this.#requestId = requestId
+		this.#stats = stats
+	}
+
+	/** Attach a stats collector after construction (used by Connection). */
+	attachStats(stats: TransportStats): void {
+		this.#stats = stats
 	}
 
 	// Will error if two messages are read at once.
 	async recv(): Promise<MessageWithType> {
 		const msg = await this.decoder.message()
+		if (this.#stats) {
+			// advertisedLength is not easily available here; use 0 as a safe fallback
+			// since control-stream bytes are counted in send() where the serialised
+			// payload length is known.  recv-side byte counting uses the type name.
+			this.#stats.onControlMessageReceived(ControlMessageType.toString(msg.type), 0)
+		}
 		return msg
 	}
 
@@ -57,6 +71,7 @@ export class ControlStream {
 			const payload = this.encoder.message(msg)
 			debug("sending payload", payload)
 			await this.encoder.send(payload)
+			this.#stats?.onControlMessageSent(ControlMessageType.toString(msg.type), payload.byteLength)
 		} finally {
 			unlock()
 		}

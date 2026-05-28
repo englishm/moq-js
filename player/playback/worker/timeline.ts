@@ -37,6 +37,11 @@ export class Component {
 	frames: ReadableStream<Frame>
 	#segments: TransformStream<Segment, Segment>
 
+	// Cumulative drop counters updated inline, read by WorkerStats.
+	segmentsDroppedStaleTotal = 0
+	segmentsDroppedSlowTotal = 0
+	segmentsDequeuedTotal = 0
+
 	constructor() {
 		this.frames = new ReadableStream({
 			pull: this.#pull.bind(this),
@@ -76,7 +81,7 @@ export class Component {
 
 			if (done) {
 				// We assume the current segment has been closed
-				// TODO support the segments stream closing
+				// TODO(itzmanish): support the segments stream closing
 				this.#current = undefined
 				continue
 			}
@@ -100,6 +105,7 @@ export class Component {
 						currentSequence: this.#current.sequence,
 						nextSequence: value.sequence,
 					})
+					this.segmentsDroppedStaleTotal++
 					await value.frames.cancel(DROPPED_SEGMENT_REASON)
 					continue
 				} else {
@@ -108,10 +114,12 @@ export class Component {
 						currentSequence: this.#current.sequence,
 						nextSequence: value.sequence,
 					})
+					this.segmentsDroppedSlowTotal++
 					await this.#current.frames.cancel(DROPPED_SEGMENT_REASON)
 				}
 			}
 
+			this.segmentsDequeuedTotal++
 			this.#current = value
 		}
 	}

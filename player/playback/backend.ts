@@ -5,8 +5,9 @@ import MediaWorker from "web-worker:./worker/index.ts"
 
 import { RingShared } from "../common/ring"
 import { Root, isAudioTrack } from "@moq-js/catalog"
-import { SubgroupHeader } from "@moq-js/transport"
+import { SubgroupHeader, Deferred } from "@moq-js/transport"
 import { getGlobalLogger, installWorkerLogReceiver, onLoggerLevelChange } from "@moq-js/transport"
+import type { MoqStat } from "@moq-js/transport"
 
 /**
  * Backend configuration. The caller (Player) is responsible for resolving
@@ -43,6 +44,17 @@ export default class Backend {
 	#disposeWorkerLogReceiver: () => void
 	// Bound message handler stored so the same reference is used for add/remove.
 	#onMessage: (e: MessageEvent) => void
+
+	// Pending getStats() requests keyed by monotonic requestId.
+	// Each entry is cleared on reply, timeout, or close. The timeout handle
+	// is stored alongside the Deferred so it can be cancelled on normal reply.
+	#pendingStatsRequests = new Map<number, { deferred: Deferred<MoqStat[]>; timeout: ReturnType<typeof setTimeout> }>()
+	#nextStatsRequestId = 1
+
+	// Whether the first video frame has been rendered (for ttff calculation).
+	#firstFrameRendered = false
+	// Resolved with performance.now() when the first frame renders.
+	#firstFrameDeferred = new Deferred<number>()
 
 	constructor(config: BackendConfig, eventTarget: EventTarget) {
 		// TODO does this block the main thread? If so, make this async
@@ -140,7 +152,55 @@ export default class Backend {
 		this.#disposeWorkerLogReceiver()
 		this.#worker.removeEventListener("message", this.#onMessage)
 		this.#worker.terminate()
+		// Reject all pending getStats() promises so callers don't hang.
+		for (const { deferred, timeout } of this.#pendingStatsRequests.values()) {
+			clearTimeout(timeout)
+			deferred.reject(new Error("backend closed"))
+		}
+		this.#pendingStatsRequests.clear()
+		// Reject the first-frame deferred if still pending.
+		if (!this.#firstFrameRendered) {
+			this.#firstFrameDeferred.reject(new Error("backend closed"))
+		}
 		await this.#audio?.context.close()
+	}
+
+	/**
+	 * Request a stats snapshot from the worker (and optionally the worklet).
+	 * Returns the worker's stat entries. Times out after 250 ms and returns an
+	 * empty array rather than rejecting so a slow worker doesn't break the
+	 * whole getStats() call.
+	 */
+	async getWorkerStats(): Promise<MoqStat[]> {
+		const requestId = this.#nextStatsRequestId++
+		const deferred = new Deferred<MoqStat[]>()
+		const timeout = setTimeout(() => {
+			if (this.#pendingStatsRequests.has(requestId)) {
+				this.#pendingStatsRequests.delete(requestId)
+				deferred.resolve([])
+			}
+		}, 250)
+		this.#pendingStatsRequests.set(requestId, { deferred, timeout })
+		this.send({ getStats: { requestId } })
+		return deferred.promise
+	}
+
+	/**
+	 * Request worklet stats from the audio subsystem. Returns an empty array
+	 * if no audio is active or the worklet times out.
+	 */
+	async getWorkletStats(): Promise<MoqStat[]> {
+		if (!this.#audio) return []
+		const entry = await this.#audio.getWorkletStats()
+		return entry ? [entry] : []
+	}
+
+	/**
+	 * Returns a Promise that resolves with the performance.now() timestamp when
+	 * the first video frame is rendered. Rejects if the backend is closed first.
+	 */
+	firstFrameRenderedAt(): Promise<number> {
+		return this.#firstFrameDeferred.promise
 	}
 
 	// Enforce we're sending valid types to the worker
@@ -154,6 +214,26 @@ export default class Backend {
 		// The video worker posts the raw string "waitingforkeyframe" (not wrapped in FromWorker).
 		if (e.data === "waitingforkeyframe") {
 			this.#eventTarget.dispatchEvent(new Event("waitingforkeyframe"))
+			return
+		}
+
+		const msg = e.data as Message.FromWorker
+
+		// Stats reply from worker.
+		if (msg.stats) {
+			const pending = this.#pendingStatsRequests.get(msg.stats.requestId)
+			if (pending) {
+				clearTimeout(pending.timeout)
+				this.#pendingStatsRequests.delete(msg.stats.requestId)
+				pending.deferred.resolve(msg.stats.entries)
+			}
+			return
+		}
+
+		// First frame rendered notification from worker.
+		if (msg.firstFrameRendered && !this.#firstFrameRendered) {
+			this.#firstFrameRendered = true
+			this.#firstFrameDeferred.resolve(performance.now())
 		}
 	}
 }
