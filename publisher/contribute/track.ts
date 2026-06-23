@@ -20,7 +20,14 @@ export class Track {
 	#notify = new Notify()
 
 	constructor(media: MediaStreamTrack, config: BroadcastConfig) {
-		this.name = media.kind
+		// Use a random 8-byte hex suffix so each track instance gets a unique
+		// name. Without this, a second video track added after removeTrack
+		// reuses the same key ("video"), causing the worker's init-track lookup
+		// to hit a stale or absent entry and hang forever on `await init.promise`.
+		const id = Array.from(crypto.getRandomValues(new Uint8Array(4)))
+			.map((b) => b.toString(16).padStart(2, "0"))
+			.join("")
+		this.name = `${media.kind}-${id}`
 
 		// We need to split based on type because Typescript is hard
 		if (isAudioTrack(media)) {

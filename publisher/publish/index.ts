@@ -61,12 +61,15 @@ export class PublisherApi {
 	 * Add a media track to the running broadcast. Delegates to
 	 * `Broadcast.addTrack`. Throws if `publish()` has not been called yet —
 	 * there is no broadcast to mutate until that point.
+	 *
+	 * Returns the generated track name (e.g. `"video-a3f7b2c1"`). Pass this
+	 * to `removeTrack` when you want to remove the track later.
 	 */
-	addTrack(media: MediaStreamTrack, config: VideoEncoderConfig | AudioEncoderConfig): void {
+	addTrack(media: MediaStreamTrack, config: VideoEncoderConfig | AudioEncoderConfig): string {
 		if (!this.broadcast) {
 			throw new Error("PublisherApi.addTrack: publish() has not been called; no broadcast to mutate")
 		}
-		this.broadcast.addTrack(media, config)
+		return this.broadcast.addTrack(media, config)
 	}
 
 	/**

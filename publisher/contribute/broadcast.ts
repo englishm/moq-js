@@ -149,7 +149,17 @@ export class Broadcast {
 	 * supplied here to override the broadcast-wide one, or omitted to fall
 	 * back to whatever was passed to the `Broadcast` constructor.
 	 */
-	addTrack(media: MediaStreamTrack, config: VideoEncoderConfig | AudioEncoderConfig): void {
+	/**
+	 * Add a media track to a running broadcast and append a matching entry
+	 * to `this.catalog.tracks`. Returns the generated track name (e.g.
+	 * `"video-a3f7b2c1"`) so callers can later pass it to `removeTrack`.
+	 *
+	 * Each call produces a unique name (via the random suffix in Track),
+	 * so there is no hard limit on how many times the same kind can be
+	 * cycled through add/remove. The caller is responsible for ensuring at
+	 * most one active track of each kind at a time.
+	 */
+	addTrack(media: MediaStreamTrack, config: VideoEncoderConfig | AudioEncoderConfig): string {
 		// Choose audio vs video config slot based on the media kind. We use
 		// the per-call config when provided, otherwise fall back to the
 		// broadcast-wide one set in the constructor.
@@ -158,15 +168,15 @@ export class Broadcast {
 			video: media.kind === "video" ? (config as VideoEncoderConfig) : this.config.video,
 		}
 
-		// Track name is currently derived from media.kind (see Track ctor), so
-		// duplicate detection happens on that name.
-		if (this.#tracks.has(media.kind)) {
-			throw new Error(`track with name '${media.kind}' already exists`)
-		}
-
 		const { track, entry } = this.#buildTrack(media, trackConfig)
 		this.#tracks.set(track.name, track)
 		this.catalog.tracks.push(entry)
+		log.debug("[catalog] addTrack: catalog after add", {
+			addedTrackName: track.name,
+			trackCount: this.catalog.tracks.length,
+			tracks: this.catalog.tracks.map((t) => ({ name: t.name, initTrack: (t as { initTrack?: string }).initTrack })),
+		})
+		return track.name
 	}
 
 	/**
@@ -183,6 +193,11 @@ export class Broadcast {
 	 */
 	async removeTrack(name: string): Promise<void> {
 		const track = this.#tracks.get(name)
+		log.debug("[catalog] removeTrack called", {
+			name,
+			trackFound: !!track,
+			currentTracks: this.catalog.tracks.map((t) => ({ name: t.name })),
+		})
 		if (!track) return
 
 		await track.close()
@@ -191,9 +206,14 @@ export class Broadcast {
 		// Catalog entries use `${trackName}.m4s` as their name.
 		const entryName = `${name}.m4s`
 		const idx = this.catalog.tracks.findIndex((t) => t.name === entryName)
+		log.debug("[catalog] removeTrack: catalog entry search", { entryName, foundAtIndex: idx })
 		if (idx >= 0) {
 			this.catalog.tracks.splice(idx, 1)
 		}
+		log.debug("[catalog] removeTrack: catalog after remove", {
+			trackCount: this.catalog.tracks.length,
+			tracks: this.catalog.tracks.map((t) => ({ name: t.name })),
+		})
 	}
 
 	async #run() {
@@ -248,6 +268,11 @@ export class Broadcast {
 		if (name !== "") throw new Error(`unknown catalog: ${name}`)
 
 		const bytes = Catalog.encode(this.catalog)
+
+		log.debug("[catalog] serving catalog to subscriber", {
+			trackCount: this.catalog.tracks.length,
+			tracks: this.catalog.tracks.map((t) => ({ name: t.name, initTrack: (t as { initTrack?: string }).initTrack })),
+		})
 
 		await subscriber.ack()
 		await sleep(500)
