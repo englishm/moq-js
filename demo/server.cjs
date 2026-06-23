@@ -6,6 +6,9 @@ const path = require('path');
 const url = require('url');
 
 const PORT = process.env.PORT || 8080;
+const DEMO_ROOT = __dirname;
+// Bundles are synced into demo/lib/ by scripts/sync-demo-lib.mjs from player/dist and publisher/dist.
+const LIB_DIST_ROOT = path.resolve(__dirname, 'lib');
 
 // MIME types for common files
 const mimeTypes = {
@@ -31,13 +34,37 @@ function getContentType(filePath) {
     return mimeTypes[ext] || 'application/octet-stream';
 }
 
+function safeResolve(root, relativePath) {
+    const resolved = path.resolve(root, relativePath);
+    if (resolved === root || resolved.startsWith(root + path.sep)) {
+        return resolved;
+    }
+
+    return null;
+}
+
+function resolvePath(requestPathname) {
+    const decoded = decodeURIComponent(requestPathname);
+
+    if (decoded === '/') {
+        return safeResolve(DEMO_ROOT, 'index.html');
+    }
+
+    if (decoded.startsWith('/lib/')) {
+        return safeResolve(LIB_DIST_ROOT, decoded.slice('/lib/'.length));
+    }
+
+    return safeResolve(DEMO_ROOT, decoded.replace(/^\//, ''));
+}
+
 const server = http.createServer((req, res) => {
     const parsedUrl = url.parse(req.url);
-    let pathname = `.${parsedUrl.pathname}`;
+    const pathname = resolvePath(parsedUrl.pathname || '/');
 
-    // Default to index.html for root path
-    if (pathname === './') {
-        pathname = './index.html';
+    if (!pathname) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('403 - Forbidden');
+        return;
     }
 
     // Set required headers for WebTransport and MoQT (enables SharedArrayBuffer)
@@ -76,10 +103,9 @@ const server = http.createServer((req, res) => {
             const contentType = getContentType(pathname);
             res.setHeader('Content-Type', contentType);
 
-            // Cache control for static assets
-            if (pathname.endsWith('.js') || pathname.endsWith('.css')) {
-                res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-            }
+            // This server is only used for local development, so always disable
+            // caching to ensure demo pages pick up fresh rollup output.
+            res.setHeader('Cache-Control', 'no-store');
 
             const fileStream = fs.createReadStream(pathname);
             fileStream.pipe(res);

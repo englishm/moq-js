@@ -1,45 +1,23 @@
-import { SubgroupHeader, SubgroupObject, SubgroupReader, SubgroupType, SubgroupWriter } from "./subgroup"
-import { KeyValuePairs } from "./base_data"
-import { debug } from "./utils"
-import { ImmutableBytesBuffer, MutableBytesBuffer, ReadableStreamBuffer, Reader, WritableStreamBuffer, Writer } from "./buffer"
+import { SubgroupHeader, SubgroupReader, SubgroupType, SubgroupWriter } from "./subgroup"
+import { ExtensionHeaders, KeyValuePairs } from "./base_data"
+import { Status } from "./object_status"
+import { getLogger } from "../common/logger"
+import {
+	ImmutableBytesBuffer,
+	MutableBytesBuffer,
+	ReadableStreamBuffer,
+	Reader,
+	WritableStreamBuffer,
+	Writer,
+} from "./buffer"
+
+export { Status } from "./object_status"
+
+const log = getLogger()
 
 export enum ObjectForwardingPreference {
 	Datagram = "Datagram",
 	Subgroup = "Subgroup",
-}
-
-export enum Status {
-	NORMAL = 0,
-	OBJECT_NULL = 1,
-	GROUP_END = 3,
-	TRACK_END = 4,
-}
-
-export namespace Status {
-	export function serialize(status: Status): Uint8Array {
-		const w = new MutableBytesBuffer(new Uint8Array())
-		w.putVarInt(status)
-		return w.Uint8Array
-	}
-	export function deserialize(reader: ImmutableBytesBuffer): Status {
-		return try_from(reader.getNumberVarInt())
-	}
-	export function try_from(value: number | bigint) {
-		const v = typeof value === "bigint" ? Number(value) : value
-
-		switch (v) {
-			case 0:
-				return Status.NORMAL
-			case 1:
-				return Status.OBJECT_NULL
-			case 3:
-				return Status.GROUP_END
-			case 4:
-				return Status.TRACK_END
-			default:
-				throw new Error(`invalid object status: ${v}`)
-		}
-	}
 }
 
 export interface Object {
@@ -56,10 +34,19 @@ export interface Object {
 }
 
 export function isDatagram(obj: ObjectDatagram | SubgroupHeader): boolean {
-	return obj.type in ObjectDatagramType
+	// Datagram types have bit 4 NOT set; subgroup types have bit 4 SET
+	return (obj.type & 0x10) === 0
 }
 
-
+// Draft-16: Object Datagram types use bitmask structure 0b00X0XXXX
+// Valid ranges: 0x00..0x0F, 0x20..0x2F
+// Bit layout:
+//   bit 0 (0x01) = EXTENSIONS
+//   bit 1 (0x02) = END_OF_GROUP
+//   bit 2 (0x04) = ZERO_OBJECT_ID (when set, Object ID omitted, implied 0)
+//   bit 3 (0x08) = DEFAULT_PRIORITY (when set, priority field omitted)
+//   bit 5 (0x20) = STATUS (when set, Object Status present instead of payload)
+// Invalid combinations: STATUS + END_OF_GROUP (0x22,0x23,0x26,0x27,0x2A,0x2B,0x2E,0x2F)
 export enum ObjectDatagramType {
 	Type0x0 = 0x0,
 	Type0x1 = 0x1,
@@ -69,11 +56,32 @@ export enum ObjectDatagramType {
 	Type0x5 = 0x5,
 	Type0x6 = 0x6,
 	Type0x7 = 0x7,
+	Type0x8 = 0x8,
+	Type0x9 = 0x9,
+	Type0xA = 0xa,
+	Type0xB = 0xb,
+	Type0xC = 0xc,
+	Type0xD = 0xd,
+	Type0xE = 0xe,
+	Type0xF = 0xf,
 	Type0x20 = 0x20,
 	Type0x21 = 0x21,
+	Type0x24 = 0x24,
+	Type0x25 = 0x25,
+	Type0x28 = 0x28,
+	Type0x29 = 0x29,
+	Type0x2C = 0x2c,
+	Type0x2D = 0x2d,
 }
 
 export namespace ObjectDatagramType {
+	// Bitmask constants
+	const EXTENSIONS_BIT = 0x01
+	const END_OF_GROUP_BIT = 0x02
+	const ZERO_OBJECT_ID_BIT = 0x04
+	const DEFAULT_PRIORITY_BIT = 0x08
+	const STATUS_BIT = 0x20
+
 	export function serialize(type: ObjectDatagramType): Uint8Array {
 		const w = new MutableBytesBuffer(new Uint8Array())
 		w.putVarInt(type)
@@ -85,68 +93,40 @@ export namespace ObjectDatagramType {
 	export function try_from(value: number | bigint): ObjectDatagramType {
 		const v = typeof value === "bigint" ? Number(value) : value
 
-		switch (v) {
-			case ObjectDatagramType.Type0x0:
-			case ObjectDatagramType.Type0x1:
-			case ObjectDatagramType.Type0x2:
-			case ObjectDatagramType.Type0x3:
-			case ObjectDatagramType.Type0x4:
-			case ObjectDatagramType.Type0x5:
-			case ObjectDatagramType.Type0x6:
-			case ObjectDatagramType.Type0x7:
-			case ObjectDatagramType.Type0x20:
-			case ObjectDatagramType.Type0x21:
-				return v as ObjectDatagramType
-			default:
-				throw new Error(`invalid object datagram type: ${v}`)
+		// Must match form 0b00X0XXXX (bit 4 NOT set)
+		if ((v & 0x10) !== 0) {
+			throw new Error(`invalid object datagram type: ${v} (bit 4 set - this is a subgroup type)`)
 		}
+		// Must be in ranges 0x00..0x0F or 0x20..0x2F
+		if (v < 0x00 || (v > 0x0f && v < 0x20) || v > 0x2f) {
+			throw new Error(`invalid object datagram type: ${v} (out of range)`)
+		}
+		// STATUS + END_OF_GROUP is invalid
+		if ((v & STATUS_BIT) !== 0 && (v & END_OF_GROUP_BIT) !== 0) {
+			throw new Error(`invalid object datagram type: ${v} (STATUS + END_OF_GROUP combination)`)
+		}
+		return v as ObjectDatagramType
 	}
 
 	export function isEndOfGroup(type: ObjectDatagramType) {
-		switch (type) {
-			case ObjectDatagramType.Type0x2:
-			case ObjectDatagramType.Type0x3:
-			case ObjectDatagramType.Type0x6:
-			case ObjectDatagramType.Type0x7:
-				return true
-			default:
-				return false
-		}
+		return (type & END_OF_GROUP_BIT) !== 0
 	}
 
 	export function hasExtensions(type: ObjectDatagramType) {
-		switch (type) {
-			case ObjectDatagramType.Type0x1:
-			case ObjectDatagramType.Type0x3:
-			case ObjectDatagramType.Type0x5:
-			case ObjectDatagramType.Type0x7:
-			case ObjectDatagramType.Type0x21:
-				return true
-			default:
-				return false
-		}
+		return (type & EXTENSIONS_BIT) !== 0
 	}
 
 	export function hasObjectId(type: ObjectDatagramType) {
-		switch (type) {
-			case ObjectDatagramType.Type0x4:
-			case ObjectDatagramType.Type0x5:
-			case ObjectDatagramType.Type0x6:
-			case ObjectDatagramType.Type0x7:
-				return false
-			default:
-				return true
-		}
+		// When ZERO_OBJECT_ID bit is set, Object ID is omitted (implied 0)
+		return (type & ZERO_OBJECT_ID_BIT) === 0
+	}
+
+	export function hasDefaultPriority(type: ObjectDatagramType) {
+		return (type & DEFAULT_PRIORITY_BIT) !== 0
 	}
 
 	export function hasStatus(type: ObjectDatagramType) {
-		switch (type) {
-			case ObjectDatagramType.Type0x20:
-			case ObjectDatagramType.Type0x21:
-				return true
-			default:
-				return false
-		}
+		return (type & STATUS_BIT) !== 0
 	}
 }
 
@@ -155,7 +135,7 @@ export interface ObjectDatagram {
 	track_alias: bigint
 	group_id: number
 	object_id?: number
-	publisher_priority: number
+	publisher_priority?: number // undefined when DEFAULT_PRIORITY bit is set
 	extension_headers?: KeyValuePairs
 	status?: Status
 	object_payload?: Uint8Array
@@ -165,22 +145,40 @@ export namespace ObjectDatagram {
 	export function serialize(obj: ObjectDatagram): Uint8Array {
 		const buf = new MutableBytesBuffer(new Uint8Array())
 		buf.putBytes(ObjectDatagramType.serialize(obj.type))
+		buf.putVarInt(obj.track_alias)
 		buf.putVarInt(obj.group_id)
-		if (obj.object_id) {
+		if (ObjectDatagramType.hasObjectId(obj.type) && obj.object_id !== undefined) {
 			buf.putVarInt(obj.object_id)
 		}
-		if (obj.object_payload) {
-			buf.putVarInt(obj.object_payload.byteLength)
-			buf.putBytes(obj.object_payload)
+		if (!ObjectDatagramType.hasDefaultPriority(obj.type) && obj.publisher_priority !== undefined) {
+			buf.putU8(obj.publisher_priority)
+		}
+		const hasExtensions = ObjectDatagramType.hasExtensions(obj.type)
+		if (hasExtensions) {
+			const extensionHeaders = obj.extension_headers ?? new Map()
+			if (
+				ObjectDatagramType.hasStatus(obj.type) &&
+				obj.status !== undefined &&
+				obj.status !== Status.NORMAL &&
+				extensionHeaders.size > 0
+			) {
+				throw new Error("non-normal object status cannot include extensions")
+			}
+			buf.putBytes(ExtensionHeaders.serialize(extensionHeaders, false))
+		}
+		if (ObjectDatagramType.hasStatus(obj.type)) {
+			if (obj.status !== undefined) {
+				buf.putVarInt(obj.status)
+			}
 		} else {
-			buf.putVarInt(0)
-			buf.putVarInt(obj.status as number)
+			if (obj.object_payload) {
+				buf.putBytes(obj.object_payload)
+			}
 		}
 		return buf.Uint8Array
 	}
 
 	export function deserialize(reader: ImmutableBytesBuffer): ObjectDatagram {
-
 		const type = reader.getNumberVarInt()
 		const alias = reader.getVarInt()
 		const group = reader.getNumberVarInt()
@@ -188,18 +186,21 @@ export namespace ObjectDatagram {
 		if (ObjectDatagramType.hasObjectId(type)) {
 			object_id = reader.getNumberVarInt()
 		}
-		const publisher_priority = reader.getU8()
+		let publisher_priority: number | undefined
+		if (!ObjectDatagramType.hasDefaultPriority(type)) {
+			publisher_priority = reader.getU8()
+		}
 		let extHeaders: KeyValuePairs | undefined
 		if (ObjectDatagramType.hasExtensions(type)) {
-			const extHeadersLength = reader.getNumberVarInt()
-			const extHeadersData = reader.getBytes(extHeadersLength)
-
-			extHeaders = KeyValuePairs.deserialize_with_size(new ImmutableBytesBuffer(extHeadersData), extHeadersLength)
+			extHeaders = ExtensionHeaders.deserialize(reader, false)
 		}
 		let status: Status | undefined
 		let payload: Uint8Array | undefined
 		if (ObjectDatagramType.hasStatus(type)) {
 			status = Status.try_from(reader.getNumberVarInt())
+			if (status !== Status.NORMAL && extHeaders && extHeaders.size > 0) {
+				throw new Error("non-normal object status cannot include extensions")
+			}
 		} else {
 			payload = reader.getBytes(reader.remaining)
 		}
@@ -219,13 +220,19 @@ export namespace ObjectDatagram {
 
 export class Objects {
 	private quic: WebTransport
+	#stats?: import("./stats").TransportStats
 
 	constructor(quic: WebTransport) {
 		this.quic = quic
 	}
 
+	/** Attach a stats collector (called by Connection after construction). */
+	attachStats(stats: import("./stats").TransportStats): void {
+		this.#stats = stats
+	}
+
 	async send(h: ObjectDatagram | SubgroupHeader): Promise<TrackWriter | SubgroupWriter> {
-		const is_datagram = isDatagram(h);
+		const is_datagram = isDatagram(h)
 
 		if (is_datagram) {
 			// Datagram mode
@@ -246,12 +253,11 @@ export class Objects {
 	}
 
 	async recv(): Promise<TrackReader | SubgroupReader | undefined> {
-		console.log("Objects.recv waiting for streams")
+		log.trace("waiting for incoming streams")
 		const streams = this.quic.incomingUnidirectionalStreams.getReader()
 
-		console.log("Objects.recv got streams", streams)
 		const { value, done } = await streams.read()
-		console.log("Objects.recv got value, done", value, done)
+		log.trace("got stream", { done })
 		streams.releaseLock()
 
 		if (done) return
@@ -262,7 +268,7 @@ export class Objects {
 		// Try to parse as SubgroupType
 		try {
 			const subgroupType = SubgroupType.try_from(type)
-			console.log("Objects.recv got type", subgroupType)
+			log.trace("parsed stream type", subgroupType)
 
 			const track_alias = await r.getVarInt()
 			const group_id = await r.getNumberVarInt()
@@ -277,7 +283,10 @@ export class Objects {
 				subgroup_id = undefined
 			}
 
-			const publisher_priority = await r.getU8()
+			let publisher_priority: number | undefined
+			if (!SubgroupType.hasDefaultPriority(subgroupType)) {
+				publisher_priority = await r.getU8()
+			}
 
 			const h: SubgroupHeader = {
 				type: subgroupType,
@@ -287,12 +296,13 @@ export class Objects {
 				publisher_priority,
 			}
 
-			console.log("Objects.recv got subgroup header", h)
+			log.trace("parsed subgroup header", h)
 
-			return new SubgroupReader(h, r)
+			this.#stats?.onStreamAccepted()
+		return new SubgroupReader(h, r)
 		} catch (e) {
 			// Not a subgroup type, might be datagram or other type
-			console.log("transport/objects.ts: unknown stream type: ", type)
+			log.warn("unknown stream type", type)
 			throw new Error(`unknown stream type: ${type}`)
 		}
 	}
@@ -303,9 +313,7 @@ export class TrackWriter {
 	// For compatibility with reader interface
 	public header = { track_alias: 0n }
 
-	constructor(
-		public stream: Writer,
-	) { }
+	constructor(public stream: Writer) {}
 
 	async write(c: ObjectDatagram) {
 		return this.stream.write(ObjectDatagram.serialize(c))
@@ -316,15 +324,11 @@ export class TrackWriter {
 	}
 }
 
-
 export class TrackReader {
 	// Header with track_alias for routing
 	public header: { track_alias: bigint }
 
-	constructor(
-		stream: Reader,
-		track_alias: bigint = 0n,
-	) {
+	constructor(stream: Reader, track_alias: bigint = 0n) {
 		this.stream = stream
 		this.header = { track_alias }
 	}
@@ -343,10 +347,15 @@ export class TrackReader {
 		if (ObjectDatagramType.hasObjectId(type)) {
 			object_id = await this.stream.getNumberVarInt()
 		}
-		const publisher_priority = await this.stream.getU8()
+		let publisher_priority: number | undefined
+		if (!ObjectDatagramType.hasDefaultPriority(type)) {
+			publisher_priority = await this.stream.getU8()
+		}
 		let extHeaders: KeyValuePairs | undefined
 		if (ObjectDatagramType.hasExtensions(type)) {
-			extHeaders = await KeyValuePairs.deserialize_with_reader(this.stream)
+			const extHeadersBytesLength = await this.stream.getNumberVarInt()
+			const extHeadersData = await this.stream.read(extHeadersBytesLength)
+			extHeaders = KeyValuePairs.deserialize(new ImmutableBytesBuffer(extHeadersData))
 		}
 		let status: Status | undefined
 		let payload: Uint8Array | undefined
@@ -372,4 +381,3 @@ export class TrackReader {
 		await this.stream.close()
 	}
 }
-

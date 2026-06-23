@@ -1,0 +1,22 @@
+{
+	"compilerOptions": {
+		"sourceMap": true,
+		"moduleResolution": "node",
+		"module": "es2022",
+		"target": "es2022",
+		"lib": ["es2022", "dom"],
+		"outDir": "./dist",
+		"strict": true,
+		"allowJs": false,
+		"allowSyntheticDefaultImports": true,
+		"downlevelIteration": true,
+		"removeComments": false,
+		"isolatedModules": false,
+		"noEmit": false,
+		"declaration": true,
+		"declarationDir": "./dist/types",
+		"typeRoots": ["./types", "./node_modules/@types"]
+	},
+	"include": ["src", "types"],
+	"exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,85 @@
+/* eslint-disable @typescript-eslint/no-var-requires */
+"use strict"
+const resolve = require("@rollup/plugin-node-resolve")
+const commonjs = require("@rollup/plugin-commonjs")
+const typescript = require("@rollup/plugin-typescript")
+const workerLoader = require("rollup-plugin-web-worker-loader")
+const babel = require("@rollup/plugin-babel")
+const terser = require("@rollup/plugin-terser")
+const dts = require("rollup-plugin-dts")
+const sourceMaps = require("rollup-plugin-sourcemaps")
+const css = require("rollup-plugin-import-css")
+const pkg = require("./package.json")
+
+const basePlugins = [
+	resolve(),
+	commonjs({
+		include: [/node_modules/, /src/],
+		transformMixedEsModules: true,
+	}),
+	workerLoader({ preserveSource: true }),
+	typescript({
+		typescript: require("typescript"),
+	}),
+	sourceMaps(),
+	babel({
+		babelHelpers: "bundled",
+		presets: ["@babel/preset-env", "@babel/preset-typescript"],
+		exclude: "./node_modules/*",
+	}),
+	terser(),
+]
+
+module.exports = [
+	// Web component (video-moq) bundle + ESM.
+	// IIFE exposes a namespace object: window.MoqPlayer.default is VideoMoq,
+	// and named exports like setGlobalLogger / createConsoleLogger are siblings.
+	{
+		input: pkg["wc-player"],
+		output: [
+			{
+				file: pkg.iife,
+				format: "iife",
+				name: "MoqPlayer",
+				sourcemap: true,
+				exports: "named",
+			},
+			{
+				file: pkg.exports["."].import,
+				format: "esm",
+				sourcemap: true,
+			},
+		],
+		plugins: [...basePlugins, css()],
+	},
+	// Simple Player (class-based, no web component) bundle + ESM.
+	// Same IIFE shape: window.MoqSimplePlayer.default is the Player class,
+	// fetchCatalog and the logger exports are sibling fields.
+	{
+		input: pkg["simple-player"],
+		output: [
+			{
+				file: pkg["iife-simple"],
+				format: "iife",
+				name: "MoqSimplePlayer",
+				sourcemap: true,
+				exports: "named",
+			},
+			{
+				file: pkg.exports["./simple-player"].import,
+				format: "esm",
+				sourcemap: true,
+			},
+		],
+		plugins: basePlugins,
+	},
+	// Type declarations (simple-player surface, used as the package types entry)
+	{
+		input: pkg["simple-player"],
+		output: {
+			file: pkg.types,
+			format: "es",
+		},
+		plugins: [dts.dts()],
+	},
+]

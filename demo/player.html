@@ -100,10 +100,19 @@
 
 		<!-- Player page logic -->
 		<script>
+			function enableMoQDebugLogging() {
+				const level = window.MoQConfig.getLogLevel?.() || "debug";
+				if (window.MoqPlayer?.setGlobalLogger && window.MoqPlayer?.createConsoleLogger) {
+					window.MoqPlayer.setGlobalLogger(window.MoqPlayer.createConsoleLogger(level));
+					console.log("MoQJS player logger enabled", level);
+				}
+			}
+
 			class MoQTPlayerDemo {
 				constructor() {
 					console.log("MoQTPlayerDemo constructor");
 					this.namespace = null;
+					this.relayUrl = null;
 					this.isConnected = false;
 					this.videoPlayer = null;
 					this.startTime = Date.now();
@@ -200,6 +209,11 @@
 				parseUrlParameters() {
 					const urlParams = new URLSearchParams(window.location.search);
 					this.namespace = urlParams.get("namespace");
+					this.relayUrl = urlParams.get("relay") || window.MoQConfig.getRelayUrl();
+					// Fingerprint precedence: ?fingerprint= query param overrides if provided,
+					// otherwise use whatever the bundled config has. The query is an override
+					// hook, not a setter — a missing param means "use the config's value".
+					this.fingerprintUrl = urlParams.get("fingerprint") || window.MoQConfig.getFingerprintUrl();
 
 					if (!this.namespace) {
 						this.showError("No stream namespace provided in URL. Please use a valid player link.");
@@ -211,7 +225,12 @@
 
 				updateConfigDisplay() {
 					this.streamNamespace.textContent = this.namespace || "Not specified";
-					this.streamRelay.textContent = window.MoQConfig.getRelayUrl();
+					this.streamRelay.textContent = this.relayUrl;
+					console.log("MoQTPlayerDemo updateConfigDisplay", {
+						namespace: this.namespace,
+						relay: this.relayUrl,
+						fingerprint: this.fingerprintUrl,
+					});
 				}
 
 				async initializePlayer() {
@@ -231,19 +250,17 @@
 						this.videoPlayer.setAttribute("controls", "");
 						this.videoPlayer.setAttribute("autoplay", "");
 						this.videoPlayer.setAttribute("muted", "");
+						this.videoPlayer.setAttribute("loglevel", window.MoQConfig.getLogLevel?.() || "debug");
 
 						// Configure the video player element with full URL
-						const srcUrl = `${window.MoQConfig.getRelayUrl()}?namespace=${this.namespace}`;
+						const srcUrl = `${this.relayUrl}?namespace=${this.namespace}`;
 						this.videoPlayer.setAttribute("src", srcUrl);
 						console.log("MoQTPlayerDemo initializePlayer srcUrl", srcUrl);
 
-						if (window.MoQConfig.getFingerprintUrl()) {
-							this.videoPlayer.setAttribute("fingerprint", window.MoQConfig.getFingerprintUrl());
+						if (this.fingerprintUrl) {
+							this.videoPlayer.setAttribute("fingerprint", this.fingerprintUrl);
 						}
-						console.log(
-							"MoQTPlayerDemo initializePlayer fingerprint",
-							window.MoQConfig.getFingerprintUrl(),
-						);
+						console.log("MoQTPlayerDemo initializePlayer fingerprint", this.fingerprintUrl);
 
 						// Add event listeners before appending to DOM
 						this.setupVideoEventListeners();
@@ -398,6 +415,8 @@
 				console.log("customElements registry:", customElements);
 
 				try {
+					enableMoQDebugLogging();
+
 					// Wait for the custom element to be defined with a timeout
 					const timeoutPromise = new Promise((_, reject) =>
 						setTimeout(() => reject(new Error("Timeout waiting for video-moq element")), 10000),

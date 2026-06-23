@@ -1,0 +1,42 @@
+{
+	"name": "@moq-js/media",
+	"version": "0.1.0",
+	"description": "MoQ shared media utilities (MP4 parsing and muxing)",
+	"license": "(MIT OR Apache-2.0)",
+	"type": "module",
+	"main": "./dist/media.cjs.js",
+	"module": "./dist/media.esm.js",
+	"types": "./dist/types/index.d.ts",
+	"exports": {
+		".": {
+			"import": "./dist/media.esm.js",
+			"require": "./dist/media.cjs.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "rollup -c rollup.config.cjs",
+		"dev": "rollup -c rollup.config.cjs -w",
+		"lint": "eslint . --ext .ts",
+		"fmt": "prettier --write ."
+	},
+	"devDependencies": {
+		"@rollup/plugin-commonjs": "^28.0.1",
+		"@rollup/plugin-node-resolve": "^15.3.0",
+		"@rollup/plugin-typescript": "^12.1.1",
+		"rollup": "^4.28.0",
+		"rollup-plugin-dts": "^6.1.1",
+		"rollup-plugin-sourcemaps": "^0.6.2",
+		"typescript": "^5.7.2"
+	},
+	"dependencies": {
+		"@moq-js/transport": "*",
+		"mp4box": "^0.5.2"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/englishm/moq-js"
+	}
+}

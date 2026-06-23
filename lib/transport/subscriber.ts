@@ -5,10 +5,23 @@ import type { TrackReader } from "./objects"
 import { debug } from "./utils"
 import { ControlStream } from "./stream"
 import { SubgroupReader } from "./subgroup"
+import { ParameterType } from "./base_data"
+import { getLogger } from "../common/logger"
+import type { TransportStats } from "./stats"
+import type { InboundTrackStats } from "./stats"
+
+const log = getLogger()
 
 export interface TrackInfo {
 	track_alias: bigint
 	track: TrackReader | SubgroupReader
+}
+
+export interface SubscribeRequestOptions {
+	forward?: number | boolean
+	subscriber_priority?: number
+	group_order?: Control.GroupOrder
+	filter?: Control.SubscriptionFilter
 }
 
 export class Subscriber {
@@ -18,28 +31,69 @@ export class Subscriber {
 	// Use to send objects.
 	#objects: Objects
 
+	// Optional stats collector shared with the owning Connection.
+	#stats?: TransportStats
+
 	// Announced broadcasts.
 	#publishedNamespaces = new Map<string, PublishNamespaceRecv>()
 	#publishedNamespacesQueue = new Watch<PublishNamespaceRecv[]>([])
-
 	// Our subscribed tracks.
 	#subscribe = new Map<bigint, SubscribeSend>()
 	#trackToIDMap = new Map<string, bigint>()
 	#trackAliasMap = new Map<bigint, bigint>() // Maps request ID to track alias
 	#aliasToSubscriptionMap = new Map<bigint, bigint>() // Maps track alias to subscription ID
 	#pendingTrack = new Map<bigint, (id: bigint) => Promise<void>>()
+	// Maps request id → InboundTrackStats for subscribe latency and per-object hooks.
+	#trackStatsByRequestId = new Map<bigint, InboundTrackStats>()
+	// Maps track alias → InboundTrackStats (set on SUBSCRIBE_OK, used in recvObject).
+	#trackStatsByAlias = new Map<bigint, InboundTrackStats>()
 
-	constructor(control: ControlStream, objects: Objects) {
+	#dropSubscribe(id: bigint): SubscribeSend | undefined {
+		const subscribe = this.#subscribe.get(id)
+		if (!subscribe) {
+			return
+		}
+
+		this.#subscribe.delete(id)
+
+		const trackAlias = this.#trackAliasMap.get(id)
+		if (trackAlias !== undefined) {
+			this.#trackAliasMap.delete(id)
+			this.#aliasToSubscriptionMap.delete(trackAlias)
+			this.#trackStatsByAlias.delete(trackAlias)
+		}
+
+		// Drop the per-subscription stat entry so it doesn't accumulate under churn.
+		const trackStatEntry = this.#trackStatsByRequestId.get(id)
+		if (trackStatEntry) {
+			this.#trackStatsByRequestId.delete(id)
+			this.#stats?.onSubscriptionDropped(trackStatEntry.id)
+		}
+
+		const mappedId = this.#trackToIDMap.get(subscribe.track)
+		if (mappedId === id) {
+			this.#trackToIDMap.delete(subscribe.track)
+		}
+
+		return subscribe
+	}
+
+	constructor(control: ControlStream, objects: Objects, stats?: TransportStats) {
 		this.#control = control
 		this.#objects = objects
+		this.#stats = stats
 	}
 
 	publishedNamespaces(): Watch<PublishNamespaceRecv[]> {
 		return this.#publishedNamespacesQueue
 	}
 
+	hasOutstandingRequest(id: bigint) {
+		return this.#subscribe.has(id)
+	}
+
 	async recv(msg: Control.MessageWithType) {
-		const { type, message } = msg;
+		const { type, message } = msg
 		switch (type) {
 			case Control.ControlMessageType.PublishNamespace:
 				await this.recvPublishNamespace(message)
@@ -50,8 +104,8 @@ export class Subscriber {
 			case Control.ControlMessageType.SubscribeOk:
 				this.recvSubscribeOk(message)
 				break
-			case Control.ControlMessageType.SubscribeError:
-				await this.recvSubscribeError(message)
+			case Control.ControlMessageType.RequestError:
+				await this.recvRequestError(message)
 				break
 			case Control.ControlMessageType.PublishDone:
 				await this.recvPublishDone(message)
@@ -67,13 +121,12 @@ export class Subscriber {
 		}
 
 		await this.#control.send({
-			type: Control.ControlMessageType.PublishNamespaceOk,
-			message: { id: msg.id }
+			type: Control.ControlMessageType.RequestOk,
+			message: { id: msg.id, parameters: new Map() },
 		})
 
 		const publishNamespace = new PublishNamespaceRecv(this.#control, msg.namespace, msg.id)
 		this.#publishedNamespaces.set(msg.namespace.join("/"), publishNamespace)
-
 		this.#publishedNamespacesQueue.update((queue) => [...queue, publishNamespace])
 	}
 
@@ -82,25 +135,58 @@ export class Subscriber {
 	}
 
 	async subscribe_namespace(namespace: string[]) {
-		const id = this.#control.nextRequestId()
+		const id = await this.#control.nextRequestId()
 		// TODO(itzmanish): implement this
 		const msg: Control.MessageWithType = {
 			type: Control.ControlMessageType.SubscribeNamespace,
 			message: {
 				id,
 				namespace,
-			}
+				subscribe_options: Control.SubscribeOptions.BOTH,
+			},
 		}
 		await this.#control.send(msg)
 	}
 
-	async subscribe(namespace: string[], track: string) {
-		const id = this.#control.nextRequestId()
+	async subscribe(namespace: string[], track: string, opts?: SubscribeRequestOptions) {
+		const id = await this.#control.nextRequestId()
 
-		const subscribe = new SubscribeSend(this.#control, id, namespace, track)
+		const subscribe = new SubscribeSend(this.#control, id, namespace, track, (sid) => {
+			// Local-state cleanup hook so SubscribeSend.close() can drop the
+			// subscription from #subscribe / #trackToIDMap / alias maps. The
+			// returned SubscribeSend (if any) is the same one calling us — we
+			// don't need to do anything else with it here.
+			this.#dropSubscribe(sid)
+		})
 		this.#subscribe.set(id, subscribe)
 
+		// Register subscribe latency timer and inbound-track stat entry.
+		if (this.#stats) {
+			// Derive kind from track name convention: ".m4s" suffix = media, ".catalog" = data.
+			const kind = track.endsWith(".m4s") ? "video/audio" : track === ".catalog" ? "data" : "unknown"
+			const trackStats = this.#stats.onSubscribe(id, track, namespace, kind, performance.now())
+			this.#trackStatsByRequestId.set(id, trackStats)
+		}
+
 		this.#trackToIDMap.set(track, id)
+
+		const params = new Map<bigint, Uint8Array | bigint>()
+		if (opts?.forward !== undefined) {
+			const forward = typeof opts.forward === "boolean" ? (opts.forward ? 1 : 0) : opts.forward
+			if (forward !== 0 && forward !== 1) throw new Error("forward must be 0, 1, true, or false")
+			params.set(BigInt(ParameterType.FORWARD), BigInt(forward))
+		}
+		if (opts?.subscriber_priority !== undefined) {
+			params.set(BigInt(ParameterType.SUBSCRIBER_PRIORITY), BigInt(opts.subscriber_priority))
+		}
+		if (opts?.group_order !== undefined) {
+			if (opts.group_order === Control.GroupOrder.Publisher)
+				throw new Error("group_order parameter must be Ascending or Descending")
+			params.set(BigInt(ParameterType.GROUP_ORDER), BigInt(opts.group_order))
+		}
+		if (opts?.filter !== undefined) {
+			params.set(BigInt(ParameterType.SUBSCRIPTION_FILTER), Control.SubscriptionFilter.serialize(opts.filter))
+		}
 
 		const subscription_req: Control.MessageWithType = {
 			type: Control.ControlMessageType.Subscribe,
@@ -108,35 +194,37 @@ export class Subscriber {
 				id,
 				namespace,
 				name: track,
-				subscriber_priority: 127, // default to mid value, see: https://github.com/moq-wg/moq-transport/issues/504
-				group_order: Control.GroupOrder.Publisher,
-				filter_type: Control.FilterType.NextGroupStart,
-				forward: 1, // always forward
-				params: new Map(),
-			}
+				params,
+			},
 		}
 
 		await this.#control.send(subscription_req)
-		debug("subscribe sent", subscription_req)
+		debug("subscribe request sent", { id, namespace, track })
 
 		return subscribe
 	}
 
 	async unsubscribe(track: string) {
-		if (this.#trackToIDMap.has(track)) {
-			const trackID = this.#trackToIDMap.get(track)
-			if (trackID === undefined) {
-				console.warn(`Exception track ${track} not found in trackToIDMap.`)
-				return
-			}
-			try {
-				await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: trackID } })
-				this.#trackToIDMap.delete(track)
-			} catch (error) {
-				console.error(`Failed to unsubscribe from track ${track}:`, error)
-			}
-		} else {
-			console.warn(`During unsubscribe request initiation attempt track ${track} not found in trackToIDMap.`)
+		const trackID = this.#trackToIDMap.get(track)
+		if (trackID === undefined) {
+			log.warn(`unsubscribe attempted but track ${track} not found in trackToIDMap`)
+			return
+		}
+
+		// Per draft-16 section 5.1.1, the subscriber keeps subscription state until it sends
+		// UNSUBSCRIBE. Tear down local state immediately after the control message is sent so
+		// consumers blocked on sub.data() can exit and the player can pause/resume cleanly.
+		let subscribe: SubscribeSend | undefined
+		try {
+			await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: trackID } })
+			subscribe = this.#dropSubscribe(trackID)
+		} catch (error) {
+			log.error(`failed to unsubscribe from track ${track}`, error)
+			return
+		}
+
+		if (subscribe) {
+			await subscribe.onDone(0n, 0n, "unsubscribed")
 		}
 	}
 
@@ -150,52 +238,76 @@ export class Subscriber {
 		this.#trackAliasMap.set(msg.id, msg.track_alias)
 		// Also create reverse mapping for receiving objects
 		this.#aliasToSubscriptionMap.set(msg.track_alias, msg.id)
+
+		// Record subscribe latency and wire alias → stats for per-object hooks.
+		if (this.#stats) {
+			this.#stats.onSubscribeOk(msg.id, performance.now())
+			const trackStats = this.#trackStatsByRequestId.get(msg.id)
+			if (trackStats) {
+				this.#trackStatsByAlias.set(msg.track_alias, trackStats)
+			}
+		}
+
 		const callback = this.#pendingTrack.get(msg.track_alias)
 		if (callback) {
 			this.#pendingTrack.delete(msg.track_alias)
-			callback(msg.id)
+			void callback(msg.id)
 		}
 
-		console.log("subscribe ok", msg)
+		log.debug("subscribe ok", msg)
 		subscribe.onOk(msg.track_alias)
 	}
 
-	async recvSubscribeError(msg: Control.SubscribeError) {
-		const subscribe = this.#subscribe.get(msg.id)
+	async recvRequestError(msg: Control.RequestError) {
+		this.#stats?.onSubscribeError(msg.id)
+		const subscribe = this.#dropSubscribe(msg.id)
 		if (!subscribe) {
-			throw new Error(`subscribe error for unknown id: ${msg.id}`)
+			throw new Error(`request error for unknown id: ${msg.id}`)
 		}
 
 		await subscribe.onError(msg.code, msg.reason)
 	}
 
 	async recvPublishDone(msg: Control.PublishDone) {
-		const subscribe = this.#subscribe.get(msg.id)
+		// Record publishDone before dropping the entry so the stat is captured.
+		const trackStats = this.#trackStatsByRequestId.get(msg.id)
+		if (trackStats) this.#stats?.onSubscribeDone(trackStats.id)
+
+		const subscribe = this.#dropSubscribe(msg.id)
 		if (!subscribe) {
-			throw new Error(`publish done for unknown id: ${msg.id}`)
+			// This can arrive after we locally sent UNSUBSCRIBE and dropped the subscription.
+			log.debug(`PUBLISH_DONE for unknown subscription (already torn down locally): ${msg.id}`)
+			return
 		}
 
 		await subscribe.onDone(msg.code, msg.stream_count, msg.reason)
 	}
 
 	async recvObject(reader: TrackReader | SubgroupReader) {
-		console.log("got object on recvObject", reader)
+		log.trace("recvObject", reader)
 		// Get track alias from reader header
 		const track_alias = reader.header.track_alias
 
+		// Record per-track stream arrival for stats.
+		const trackStats = this.#trackStatsByAlias.get(track_alias)
+		if (trackStats) {
+			trackStats.onStreamArrived(performance.now())
+		}
+
 		// Map track alias back to subscription ID
 		const subscriptionId = this.#aliasToSubscriptionMap.get(track_alias)
-		console.log("got subscriptionId", subscriptionId)
+		log.trace("resolved subscriptionId", subscriptionId)
 		const callback = async (id: bigint) => {
 			const subscribe = this.#subscribe.get(id)
 			if (!subscribe) {
-				throw new Error(`data for unknown subscription: ${id}`)
+				log.debug(`dropping data for already-removed subscription: ${id}`)
+				return
 			}
-			console.log("doing subscribe on data", reader)
+			log.trace("dispatching data to subscription", id)
 			return subscribe.onData(reader)
 		}
 		if (subscriptionId === undefined) {
-			console.warn(`Exception track alias ${track_alias} not found in aliasToSubscriptionMap.`)
+			log.warn(`track alias ${track_alias} not found in aliasToSubscriptionMap`)
 			this.#pendingTrack.set(track_alias, callback)
 			return
 		}
@@ -226,8 +338,8 @@ export class PublishNamespaceRecv {
 
 		// Send the control message.
 		return this.#control.send({
-			type: Control.ControlMessageType.PublishNamespaceOk,
-			message: { id: this.#id }
+			type: Control.ControlMessageType.RequestOk,
+			message: { id: this.#id, parameters: new Map() },
 		})
 	}
 
@@ -236,8 +348,8 @@ export class PublishNamespaceRecv {
 		this.#state = "closed"
 
 		return this.#control.send({
-			type: Control.ControlMessageType.PublishNamespaceError,
-			message: { id: this.#id, code, reason }
+			type: Control.ControlMessageType.RequestError,
+			message: { id: this.#id, code, retry_interval: 0n, reason },
 		})
 	}
 }
@@ -246,6 +358,16 @@ export class SubscribeSend {
 	#control: ControlStream
 	#id: bigint
 	#trackAlias?: bigint // Set when SUBSCRIBE_OK is received
+	// Closed locally once UNSUBSCRIBE has been sent OR a terminal control
+	// message (PUBLISH_DONE / REQUEST_ERROR) was received. Used to make
+	// close() idempotent and to avoid sending UNSUBSCRIBE for a subscription
+	// that the publisher has already terminated.
+	#closed = false
+	// Hook back into the owning Subscriber so close() can drop local
+	// bookkeeping (subscribe map, trackToID map, alias maps). Not invoked when
+	// the subscription was already terminated by the publisher — the receive
+	// path drops state itself in that case.
+	#onClose: (id: bigint) => void
 
 	readonly namespace: string[]
 	readonly track: string
@@ -253,11 +375,18 @@ export class SubscribeSend {
 	// A queue of received streams for this subscription.
 	#data = new Queue<TrackReader | SubgroupReader>()
 
-	constructor(control: ControlStream, id: bigint, namespace: string[], track: string) {
+	constructor(
+		control: ControlStream,
+		id: bigint,
+		namespace: string[],
+		track: string,
+		onClose: (id: bigint) => void,
+	) {
 		this.#control = control // so we can send messages
 		this.#id = id
 		this.namespace = namespace
 		this.track = track
+		this.#onClose = onClose
 	}
 
 	get trackAlias(): bigint | undefined {
@@ -265,21 +394,59 @@ export class SubscribeSend {
 	}
 
 	async close(_code = 0n, _reason = "") {
-		// TODO implement unsubscribe
-		// await this.#inner.sendReset(code, reason)
+		// Idempotent. The subscription may already be torn down because:
+		//   - The publisher sent PUBLISH_DONE / REQUEST_ERROR (recv path
+		//     called onDone/onError, which sets #closed).
+		//   - A previous close() call already sent UNSUBSCRIBE.
+		// In either case there's nothing more to do — re-sending UNSUBSCRIBE
+		// would target an unknown subscription id on the relay.
+		if (this.#closed) return
+		this.#closed = true
+
+		try {
+			await this.#control.send({
+				type: Control.ControlMessageType.Unsubscribe,
+				message: { id: this.#id },
+			})
+		} catch (err) {
+			log.warn("failed to send UNSUBSCRIBE on close", { id: this.#id, track: this.track, err })
+			// Still drop local state below — keeping a stale entry around
+			// after a control-stream failure helps nothing.
+		}
+
+		// Drop the local subscription bookkeeping so a follow-up
+		// subscribe(namespace, sameTrack) on this connection can succeed.
+		this.#onClose(this.#id)
+
+		// Close the data queue so anyone awaiting sub.data() unblocks.
+		if (!this.#data.closed()) {
+			await this.#data.close()
+		}
 	}
 
 	onOk(trackAlias: bigint) {
-		console.log("setting track alias", trackAlias)
+		log.debug("setting track alias", trackAlias)
 		this.#trackAlias = trackAlias
 	}
 
-	// FIXME(itzmanish): implement correctly 
+	// FIXME(itzmanish): implement correctly
 	async onDone(code: bigint, streamCount: bigint, reason: string) {
-		throw new Error(`TODO onDone`)
+		log.debug("subscription done", { id: this.#id, code, streamCount, reason, track: this.track })
+		// Publisher terminated the subscription — no need for us to send
+		// UNSUBSCRIBE on a subsequent close().
+		this.#closed = true
+
+		if (code === 0n) {
+			return await this.#data.close()
+		}
+
+		const suffix = reason !== "" ? `: ${reason}` : ""
+		return await this.#data.abort(new Error(`PUBLISH_DONE (${code})${suffix}`))
 	}
 
 	async onError(code: bigint, reason: string) {
+		// Relay/publisher errored the subscription — same reasoning as onDone.
+		this.#closed = true
 		if (code == 0n) {
 			return await this.#data.close()
 		}
@@ -288,12 +455,12 @@ export class SubscribeSend {
 			reason = `: ${reason}`
 		}
 
-		const err = new Error(`SUBSCRIBE_ERROR (${code})${reason}`)
+		const err = new Error(`REQUEST_ERROR (${code})${reason}`)
 		return await this.#data.abort(err)
 	}
 
 	async onData(reader: TrackReader | SubgroupReader) {
-		console.log("subscribe send onData", reader)
+		log.trace("onData", reader)
 		if (!this.#data.closed()) await this.#data.push(reader)
 	}
 

@@ -1,37 +1,39 @@
-import { ControlMessageType } from "."
+import { ControlMessageType } from "./message_type"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { Parameters, Tuple } from "../base_data"
 
-
 export interface PublishNamespace {
-    id: bigint
-    namespace: Tuple<string>
-    params?: Parameters
+	id: bigint
+	namespace: Tuple<string>
+	params?: Parameters
 }
 
 export namespace PublishNamespace {
-    export function serialize(v: PublishNamespace): Uint8Array {
-        const mainBuf = new MutableBytesBuffer(new Uint8Array())
-        mainBuf.putVarInt(ControlMessageType.PublishNamespace)
+	export function serialize(v: PublishNamespace): Uint8Array {
+		const mainBuf = new MutableBytesBuffer(new Uint8Array())
+		mainBuf.putVarInt(ControlMessageType.PublishNamespace)
 
-        const payloadBuf = new MutableBytesBuffer(new Uint8Array())
-        payloadBuf.putVarInt(v.id)
-        payloadBuf.putBytes(Tuple.serialize(v.namespace))
-        payloadBuf.putBytes(Parameters.serialize(v.params ?? new Map()))
+		const payloadBuf = new MutableBytesBuffer(new Uint8Array())
+		payloadBuf.putVarInt(v.id)
+		payloadBuf.putBytes(Tuple.serialize(v.namespace))
+		// Draft-16: Number of Parameters + delta-encoded parameters
+		const params = v.params ?? new Map()
+		payloadBuf.putBytes(Parameters.serialize(params))
 
-        mainBuf.putU16(payloadBuf.byteLength)
-        mainBuf.putBytes(payloadBuf.Uint8Array)
-        return mainBuf.Uint8Array
-    }
+		mainBuf.putU16(payloadBuf.byteLength)
+		mainBuf.putBytes(payloadBuf.Uint8Array)
+		return mainBuf.Uint8Array
+	}
 
-    export function deserialize(reader: ImmutableBytesBuffer): PublishNamespace {
-        const id = reader.getVarInt()
-        const namespace = Tuple.deserialize(reader)
-        const params = Parameters.deserialize(reader)
-        return {
-            id,
-            namespace,
-            params
-        }
-    }
+	export function deserialize(reader: ImmutableBytesBuffer): PublishNamespace {
+		const id = reader.getVarInt()
+		const namespace = Tuple.deserialize(reader)
+		const numParams = reader.getNumberVarInt()
+		const params = Parameters.deserialize_with_count(reader, numParams)
+		return {
+			id,
+			namespace,
+			params,
+		}
+	}
 }

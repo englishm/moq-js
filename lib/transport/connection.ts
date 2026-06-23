@@ -2,9 +2,15 @@ import * as Control from "./control"
 import { Objects } from "./objects"
 import { asError } from "../common/error"
 import { ControlStream } from "./stream"
+import { getLogger } from "../common/logger"
+import { TransportStats } from "./stats"
+import type { MoqStatsReport } from "../common/stats"
 
 import { Publisher } from "./publisher"
 import { Subscriber } from "./subscriber"
+import type { SubscribeRequestOptions } from "./subscriber"
+
+const log = getLogger()
 
 export class Connection {
 	// The established WebTransport session.
@@ -25,19 +31,41 @@ export class Connection {
 	// Async work running in the background
 	#running: Promise<void>
 
-	constructor(quic: WebTransport, stream: ControlStream, objects: Objects) {
+	// Guards against double-close. WebTransport.close() throws synchronously if
+	// the session is already closed, so we make close() idempotent.
+	#closed = false
+
+	// Shared stats collector; also exposed on Subscriber for per-track hooks.
+	#stats: TransportStats
+
+	constructor(quic: WebTransport, stream: ControlStream, objects: Objects, stats?: TransportStats) {
 		this.#quic = quic
 		this.#controlStream = stream
 		this.#objects = objects
+		this.#stats = stats ?? new TransportStats()
+		// Record the moment the connection is live.
+		this.#stats.onConnected(performance.now())
+		// Wire stats into the sub-components that write to it.
+		this.#controlStream.attachStats(this.#stats)
+		this.#objects.attachStats(this.#stats)
 
 		this.#publisher = new Publisher(this.#controlStream, this.#objects)
-		this.#subscriber = new Subscriber(this.#controlStream, this.#objects)
+		this.#subscriber = new Subscriber(this.#controlStream, this.#objects, this.#stats)
 
 		this.#running = this.#run()
 	}
 
 	close(code = 0, reason = "") {
-		this.#quic.close({ closeCode: code, reason })
+		if (this.#closed) return
+		this.#closed = true
+		try {
+			this.#quic.close({ closeCode: code, reason })
+		} catch (e) {
+			// WebTransport.close() throws synchronously if the session is already
+			// closed (e.g. remote peer terminated the session). That's not an error
+			// we want to propagate to callers.
+			log.debug("Connection.close swallowed underlying throw", e)
+		}
 	}
 
 	async #run(): Promise<void> {
@@ -52,8 +80,8 @@ export class Connection {
 		return this.#subscriber.publishedNamespaces()
 	}
 
-	subscribe(namespace: string[], track: string) {
-		return this.#subscriber.subscribe(namespace, track)
+	subscribe(namespace: string[], track: string, opts?: SubscribeRequestOptions) {
+		return this.#subscriber.subscribe(namespace, track, opts)
 	}
 
 	unsubscribe(track: string) {
@@ -64,38 +92,76 @@ export class Connection {
 		return this.#publisher.subscribed()
 	}
 
+	/**
+	 * Synchronously snapshot transport-level stats into a new `MoqStatsReport`.
+	 * The caller may pass an existing report to merge into it.
+	 */
+	getStats(report?: MoqStatsReport): MoqStatsReport {
+		const r = report ?? new Map()
+		this.#stats.collect(r, performance.now())
+		return r
+	}
+
 	async #runControl() {
 		// Receive messages until the connection is closed.
 		try {
-			console.log("starting control loop")
-			for (; ;) {
+			log.debug("starting control loop")
+			for (;;) {
 				const msg = await this.#controlStream.recv()
 				await this.#recv(msg)
 			}
 		} catch (e) {
-			console.error("Error in control stream:", e)
+			log.error("control stream error", e)
 			throw e
 		}
 	}
 
 	async #runObjects() {
 		try {
-			console.log("starting object loop")
-			for (; ;) {
+			log.debug("starting object loop")
+			for (;;) {
 				const obj = await this.#objects.recv()
-				console.log("object loop got obj", obj)
+				log.trace("object loop got obj", obj)
 				if (!obj) break
 
 				await this.#subscriber.recvObject(obj)
 			}
 		} catch (e) {
-			console.error("Error in object stream:", e)
+			log.error("object stream error", e)
 			throw e
 		}
 	}
 
 	async #recv(msg: Control.MessageWithType) {
-		if (Control.isPublisher(msg.type)) {
+		if (msg.type === Control.ControlMessageType.GoAway) {
+			return
+		}
+		if (msg.type === Control.ControlMessageType.MaxRequestId) {
+			this.#controlStream.applyMaxRequestId(msg.message)
+			return
+		}
+		if (msg.type === Control.ControlMessageType.RequestsBlocked) {
+			this.#controlStream.handleRequestsBlocked(msg.message)
+			return
+		}
+		if (isNewRequest(msg)) {
+			this.#controlStream.validateIncomingRequestId(msg.message.id)
+		}
+
+		// REQUEST_OK/REQUEST_ERROR are responses; route them to the role that owns
+		// the original local request. Request ID parity is client/server scoped, not
+		// publisher/subscriber scoped.
+		if (msg.type === Control.ControlMessageType.RequestOk || msg.type === Control.ControlMessageType.RequestError) {
+			const id = (msg.message as { id: bigint }).id
+			if (this.#subscriber.hasOutstandingRequest(id)) {
+				await this.#subscriber.recv(msg)
+			} else if (this.#publisher.hasOutstandingRequest(id)) {
+				await this.#publisher.recv(msg)
+			} else {
+				this.#stats.onUnknownRequestError()
+				throw new Error(`response for unknown request: ${id}`)
+			}
+		} else if (Control.isPublisher(msg.type)) {
 			await this.#subscriber.recv(msg)
 		} else {
 			await this.#publisher.recv(msg)
@@ -109,5 +175,20 @@ export class Connection {
 		} catch (e) {
 			return asError(e)
 		}
+	}
+}
+
+function isNewRequest(msg: Control.MessageWithType): msg is Control.MessageWithType & { message: { id: bigint } } {
+	switch (msg.type) {
+		case Control.ControlMessageType.Subscribe:
+		case Control.ControlMessageType.SubscribeUpdate:
+		case Control.ControlMessageType.SubscribeNamespace:
+		case Control.ControlMessageType.Publish:
+		case Control.ControlMessageType.PublishNamespace:
+		case Control.ControlMessageType.Fetch:
+		case Control.ControlMessageType.TrackStatus:
+			return true
+		default:
+			return false
 	}
 }

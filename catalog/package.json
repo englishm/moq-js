@@ -1,0 +1,36 @@
+{
+	"name": "@moq-js/catalog",
+	"version": "0.1.0",
+	"description": "MoQ catalog encode/decode and type definitions",
+	"license": "(MIT OR Apache-2.0)",
+	"type": "module",
+	"main": "./dist/catalog.cjs.js",
+	"module": "./dist/catalog.esm.js",
+	"types": "./dist/types/index.d.ts",
+	"exports": {
+		".": {
+			"import": "./dist/catalog.esm.js",
+			"require": "./dist/catalog.cjs.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "rollup -c rollup.config.cjs",
+		"dev": "rollup -c rollup.config.cjs -w",
+		"lint": "eslint . --ext .ts",
+		"fmt": "prettier --write ."
+	},
+	"devDependencies": {
+		"@rollup/plugin-node-resolve": "^15.3.0",
+		"@rollup/plugin-typescript": "^12.1.1",
+		"rollup": "^4.28.0",
+		"rollup-plugin-dts": "^6.1.1",
+		"typescript": "^5.7.2"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/englishm/moq-js"
+	}
+}
