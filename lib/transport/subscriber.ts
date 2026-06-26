@@ -32,6 +32,28 @@ export class Subscriber {
 	#aliasToSubscriptionMap = new Map<bigint, bigint>() // Maps track alias to subscription ID
 	#pendingTrack = new Map<bigint, (id: bigint) => Promise<void>>()
 
+	#dropSubscribe(id: bigint): SubscribeSend | undefined {
+		const subscribe = this.#subscribe.get(id)
+		if (!subscribe) {
+			return
+		}
+
+		this.#subscribe.delete(id)
+
+		const trackAlias = this.#trackAliasMap.get(id)
+		if (trackAlias !== undefined) {
+			this.#trackAliasMap.delete(id)
+			this.#aliasToSubscriptionMap.delete(trackAlias)
+		}
+
+		const mappedId = this.#trackToIDMap.get(subscribe.track)
+		if (mappedId === id) {
+			this.#trackToIDMap.delete(subscribe.track)
+		}
+
+		return subscribe
+	}
+
 	constructor(control: ControlStream, objects: Objects) {
 		this.#control = control
 		this.#objects = objects
@@ -164,7 +186,7 @@ export class Subscriber {
 	}
 
 	async recvSubscribeError(msg: Control.SubscribeError) {
-		const subscribe = this.#subscribe.get(msg.id)
+		const subscribe = this.#dropSubscribe(msg.id)
 		if (!subscribe) {
 			throw new Error(`subscribe error for unknown id: ${msg.id}`)
 		}
@@ -173,7 +195,7 @@ export class Subscriber {
 	}
 
 	async recvPublishDone(msg: Control.PublishDone) {
-		const subscribe = this.#subscribe.get(msg.id)
+		const subscribe = this.#dropSubscribe(msg.id)
 		if (!subscribe) {
 			throw new Error(`publish done for unknown id: ${msg.id}`)
 		}
@@ -279,7 +301,14 @@ export class SubscribeSend {
 
 	// FIXME(itzmanish): implement correctly
 	async onDone(code: bigint, streamCount: bigint, reason: string) {
-		throw new Error(`TODO onDone`)
+		console.log("subscription done", { id: this.#id, code, streamCount, reason, track: this.track })
+
+		if (code === 0n) {
+			return await this.#data.close()
+		}
+
+		const suffix = reason !== "" ? `: ${reason}` : ""
+		return await this.#data.abort(new Error(`SUBSCRIBE_DONE (${code})${suffix}`))
 	}
 
 	async onError(code: bigint, reason: string) {

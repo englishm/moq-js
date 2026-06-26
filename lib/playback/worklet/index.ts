@@ -50,10 +50,16 @@ class Renderer extends AudioWorkletProcessor {
 		}
 
 		const output = outputs[0]
+		if (!output?.length) {
+			return true
+		}
 
 		const size = this.ring.read(output)
-		if (size < output.length) {
-			// TODO trigger rebuffering event
+		if (size < output[0].length) {
+			console.warn("audio underrun", {
+				requestedFrames: output[0].length,
+				readFrames: size,
+			})
 		}
 
 		return true
