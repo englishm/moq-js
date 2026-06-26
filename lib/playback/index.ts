@@ -52,7 +52,7 @@ export default class Player extends EventTarget {
 		this.#audioTrackName = catalog.tracks.find((track) => Catalog.isAudioTrack(track))?.name ?? ""
 		this.#videoTrackName = catalog.tracks.find((track) => Catalog.isVideoTrack(track))?.name ?? ""
 		this.#muted = false
-		this.#paused = false
+		this.#paused = true
 		this.#backend = new Backend({ canvas, catalog }, this)
 		super.dispatchEvent(new CustomEvent("catalogupdated", { detail: catalog }))
 		super.dispatchEvent(new CustomEvent("loadedmetadata", { detail: catalog }))
@@ -157,7 +157,7 @@ export default class Player extends EventTarget {
 			for (; ;) {
 				console.log("waiting for segment data")
 				const segment = await Promise.race([sub.data(), this.#running])
-				if (!segment) continue
+				if (!segment) break
 
 				if (!(segment instanceof SubgroupReader)) {
 					throw new Error(`expected group reader for segment: ${track.name}`)
@@ -277,14 +277,19 @@ export default class Player extends EventTarget {
 	}
 
 	async mute(isMuted: boolean) {
+		const wasMuted = this.#muted
 		this.#muted = isMuted
 		if (isMuted) {
-			console.log("Unsubscribing from audio track: ", this.#audioTrackName)
-			await this.unsubscribeFromTrack(this.#audioTrackName)
+			if (!this.#paused && !wasMuted && this.#audioTrackName) {
+				console.log("Unsubscribing from audio track: ", this.#audioTrackName)
+				await this.unsubscribeFromTrack(this.#audioTrackName)
+			}
 			await this.#backend.mute()
 		} else {
-			console.log("Subscribing to audio track: ", this.#audioTrackName)
-			this.subscribeFromTrackName(this.#audioTrackName)
+			if (!this.#paused && wasMuted && this.#audioTrackName) {
+				console.log("Subscribing to audio track: ", this.#audioTrackName)
+				this.subscribeFromTrackName(this.#audioTrackName)
+			}
 			await this.#backend.unmute()
 		}
 		super.dispatchEvent(new CustomEvent("volumechange", { detail: { muted: isMuted } }))
@@ -372,7 +377,9 @@ export default class Player extends EventTarget {
 		if (!this.#paused) {
 			this.#paused = true
 			const mutePromise = this.#backend.mute()
-			const audioPromise = this.unsubscribeFromTrack(this.#audioTrackName)
+			const audioPromise = !this.#muted && this.#audioTrackName
+				? this.unsubscribeFromTrack(this.#audioTrackName)
+				: Promise.resolve()
 			const videoPromise = this.unsubscribeFromTrack(this.#videoTrackName)
 			super.dispatchEvent(new CustomEvent("pause", { detail: { track: this.#videoTrackName } }))
 			console.log("dispatchEvent pause")
