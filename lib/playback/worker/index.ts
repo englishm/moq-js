@@ -9,6 +9,9 @@ import { asError } from "../../common/error"
 import { Deferred } from "../../common/async"
 import { SubgroupReader } from "../../transport/subgroup"
 import { ReadableStreamBuffer } from "../../transport/buffer"
+import { getWorkerLogger, setWorkerLogLevel } from "../../common/logger"
+
+const log = getWorkerLogger()
 
 class Worker {
 	// Timeline receives samples, buffering them and choosing the timestamp to render.
@@ -25,13 +28,16 @@ class Worker {
 		const msg = e.data as Message.ToWorker
 		// console.log("message: ", msg)
 
-		if (msg.config) {
+		if (msg.logLevel !== undefined) {
+			// Update the module-level worker log level so all worker loggers re-read it.
+			setWorkerLogLevel(msg.logLevel)
+		} else if (msg.config) {
 			this.#onConfig(msg.config)
 		} else if (msg.init) {
-			// TODO buffer the init segmnet so we don't hold the stream open.
+			// TODO buffer the init segment so we don't hold the stream open.
 			this.#onInit(msg.init)
 		} else if (msg.segment) {
-			this.#onSegment(msg.segment).catch(console.warn)
+			this.#onSegment(msg.segment).catch((e) => log.warn("onSegment failed", e))
 		} else if (msg.play === false) {
 			this.#onPause(msg.play)
 		} else if (msg.play === true) {
@@ -90,7 +96,7 @@ class Worker {
 		segments.releaseLock()
 
 		// Read each chunk, decoding the MP4 frames and adding them to the queue.
-		for (; ;) {
+		for (;;) {
 			const chunk = await reader.read()
 			if (!chunk) {
 				break
@@ -175,7 +181,7 @@ self.addEventListener("message", (msg) => {
 		worker.on(msg)
 	} catch (e) {
 		const err = asError(e)
-		console.warn("worker error:", err)
+		log.warn("worker error:", err)
 	}
 })
 

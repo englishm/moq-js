@@ -1,6 +1,9 @@
 import { Frame, Component } from "./timeline"
 import * as MP4 from "../../media/mp4"
 import * as Message from "./message"
+import { getWorkerLogger } from "../../common/logger"
+
+const log = getWorkerLogger()
 
 interface DecoderConfig {
 	codec: string
@@ -40,13 +43,13 @@ export class Renderer {
 			transform: this.#transform.bind(this),
 		})
 
-		this.#run().catch(console.error)
+		this.#run().catch((e) => log.error("run failed", e))
 	}
 
 	pause() {
 		this.#paused = true
 		this.#decoder.flush().catch((err) => {
-			console.error(err)
+			log.error("flush failed on pause", err)
 		})
 		this.#waitingForKeyframe = true
 	}
@@ -57,7 +60,7 @@ export class Renderer {
 
 	async #run() {
 		const reader = this.#timeline.frames.pipeThrough(this.#queue).getReader()
-		for (; ;) {
+		for (;;) {
 			const { value: frame, done } = await reader.read()
 			if (this.#paused) continue
 			if (done) break
@@ -80,13 +83,13 @@ export class Renderer {
 			output: (frame: VideoFrame) => {
 				controller.enqueue(frame)
 			},
-			error: console.error,
+			error: (e) => log.error("video decoder error", e),
 		})
 	}
 
 	#transform(frame: Frame) {
 		if (this.#decoder.state === "closed" || this.#paused) {
-			console.warn("Decoder is closed or paused. Skipping frame.")
+			log.warn("decoder is closed or paused, skipping frame")
 			return
 		}
 
@@ -129,9 +132,9 @@ export class Renderer {
 
 			try {
 				this.#decoder.configure(this.#decoderConfig)
-				console.log(`[VideoWorker] Decoder configured successfully. New state: ${this.#decoder.state}`)
+				log.debug("decoder configured", { codec: track.codec, state: this.#decoder.state })
 			} catch (e) {
-				console.error("[VideoWorker] FAILED to configure decoder:", e)
+				log.error("failed to configure decoder", e)
 				return // Stop processing if configure fails
 			}
 			if (!frame.sample.is_sync) {
@@ -141,10 +144,10 @@ export class Renderer {
 			}
 		}
 
-		//At the start of decode , VideoDecoder seems to expect a key frame after configure() or flush()
+		//At the start of decode, VideoDecoder seems to expect a key frame after configure() or flush()
 		if (this.#decoder.state == "configured") {
 			if (this.#waitingForKeyframe && !frame.sample.is_sync) {
-				console.warn("Skipping non-keyframe until a keyframe is found.")
+				log.warn("skipping non-keyframe until a keyframe is found")
 				if (!this.#hasSentWaitingForKeyFrameEvent) {
 					self.postMessage("waitingforkeyframe")
 					this.#hasSentWaitingForKeyFrameEvent = true
@@ -168,11 +171,11 @@ export class Renderer {
 				duration,
 			})
 
-			console.log(`[VideoWorker] Decoding chunk, type: ${chunk.type}, size: ${chunk.byteLength}`)
+			log.trace("decoding chunk", { type: chunk.type, size: chunk.byteLength })
 			try {
 				this.#decoder.decode(chunk)
 			} catch (e) {
-				console.error("[VideoWorker] FAILED to decode chunk:", e)
+				log.error("failed to decode chunk", e)
 			}
 		}
 	}

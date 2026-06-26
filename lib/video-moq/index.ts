@@ -1,6 +1,9 @@
 import Player from "../playback/index"
 import { FULLSCREEN_BUTTON, PICTURE_IN_PICTURE_BUTTON, VOLUME_CONTROL } from "./control-buttons"
 import { ENTER_PIP_SVG, EXIT_PIP_SVG, PAUSE_SVG, PLAY_SVG } from "./icons"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 /**
  * This stylesheet is self contained within the shadow root
@@ -62,12 +65,12 @@ export class VideoMoq extends HTMLElement {
 	set muted(mute: boolean) {
 		if (mute) {
 			this.mute().catch((err) => {
-				console.error("Error muting:", err)
+				log.error("Error muting:", err)
 			})
 			this.dispatchEvent(new Event("volumechange"))
 		} else {
 			this.unmute().catch((err) => {
-				console.error("Error unmuting:", err)
+				log.error("Error unmuting:", err)
 			})
 			this.dispatchEvent(new Event("volumechange"))
 		}
@@ -80,11 +83,11 @@ export class VideoMoq extends HTMLElement {
 	set fullscreen(fullscreen: boolean) {
 		if (fullscreen) {
 			this.requestFullscreen().catch((err) => {
-				console.error("Error entering fullscreen:", err)
+				log.error("Error entering fullscreen:", err)
 			})
 		} else {
 			this.exitFullscreen().catch((err) => {
-				console.error("Error exiting fullscreen:", err)
+				log.error("Error exiting fullscreen:", err)
 			})
 		}
 	}
@@ -120,25 +123,25 @@ export class VideoMoq extends HTMLElement {
 		// Bind event listeners to add and remove from lists.
 		this.playPauseEventHandler = () => {
 			this.togglePlayPause().catch((err) => {
-				console.error("Error toggling play/pause:", err)
+				log.error("Error toggling play/pause:", err)
 			})
 		}
 
 		this.toggleMuteEventHandler = () => {
 			this.toggleMute().catch((err) => {
-				console.error("Error toggling mute:", err)
+				log.error("Error toggling mute:", err)
 			})
 		}
 
 		this.togglePictureInPictureEventHandler = () => {
 			this.togglePictureInPicture().catch((err) => {
-				console.error("Error toggling picture-in-picture: ", err)
+				log.error("Error toggling picture-in-picture: ", err)
 			})
 		}
 
 		this.setVolume = (e: Event) => {
 			this.handleVolumeChange(e as Event & { currentTarget: HTMLInputElement }).catch((err) => {
-				console.error("Error setting volume: ", err)
+				log.error("Error setting volume: ", err)
 			})
 		}
 
@@ -166,7 +169,7 @@ export class VideoMoq extends HTMLElement {
 	 * */
 	disconnectedCallback() {
 		this.destroy().catch((error) => {
-			console.error("Error while destroying:", error)
+			log.error("Error while destroying:", error)
 		})
 	}
 
@@ -213,7 +216,7 @@ export class VideoMoq extends HTMLElement {
 
 	private load() {
 		this.destroy().catch((error) => {
-			console.error("Error while destroying:", error)
+			log.error("Error while destroying:", error)
 		})
 
 		this.shadow.innerHTML = /*html*/ `
@@ -373,7 +376,7 @@ export class VideoMoq extends HTMLElement {
 				await this.pause()
 			}
 		} catch (error) {
-			console.error("Error toggling play/pause:", error)
+			log.error("Error toggling play/pause:", error)
 		} finally {
 			if (this.#playButton) {
 				this.#playButton.disabled = false
@@ -384,20 +387,20 @@ export class VideoMoq extends HTMLElement {
 	public play(): Promise<void> {
 		return this.player
 			? this.player.play().then(() => {
-				if (!this.#playButton) return
-				this.#playButton.innerHTML = PAUSE_SVG
-				this.#playButton.ariaLabel = "Pause"
-			})
+					if (!this.#playButton) return
+					this.#playButton.innerHTML = PAUSE_SVG
+					this.#playButton.ariaLabel = "Pause"
+				})
 			: Promise.resolve()
 	}
 
 	public pause(): Promise<void> {
 		return this.player
 			? this.player.pause().then(() => {
-				if (!this.#playButton) return
-				this.#playButton.innerHTML = PLAY_SVG
-				this.#playButton.ariaLabel = "Play"
-			})
+					if (!this.#playButton) return
+					this.#playButton.innerHTML = PLAY_SVG
+					this.#playButton.ariaLabel = "Play"
+				})
 			: Promise.resolve()
 	}
 
@@ -415,7 +418,7 @@ export class VideoMoq extends HTMLElement {
 				await this.mute()
 			}
 		} catch (error) {
-			console.error("Error toggling mute:", error)
+			log.error("Error toggling mute:", error)
 		} finally {
 			if (this.#volumeButton) {
 				this.#volumeButton.disabled = false
@@ -426,23 +429,23 @@ export class VideoMoq extends HTMLElement {
 	public unmute(): Promise<void> {
 		return this.player
 			? this.player.mute(false).then(() => {
-				if (!this.#volumeButton) return
-				this.#volumeButton.ariaLabel = "Mute"
-				this.#volumeButton.innerText = "🔊"
-				this.#volumeRange!.value = this.previousVolume.toString()
-			})
+					if (!this.#volumeButton) return
+					this.#volumeButton.ariaLabel = "Mute"
+					this.#volumeButton.innerText = "🔊"
+					this.#volumeRange!.value = this.previousVolume.toString()
+				})
 			: Promise.resolve()
 	}
 
 	public mute(): Promise<void> {
 		return this.player
 			? this.player.mute(true).then(() => {
-				if (!this.#volumeButton) return
-				this.#volumeButton.ariaLabel = "Unmute"
-				this.#volumeButton.innerText = "🔇"
-				this.previousVolume = parseFloat(this.#volumeRange!.value)
-				this.#volumeRange!.value = "0"
-			})
+					if (!this.#volumeButton) return
+					this.#volumeButton.ariaLabel = "Unmute"
+					this.#volumeButton.innerText = "🔇"
+					this.previousVolume = parseFloat(this.#volumeRange!.value)
+					this.#volumeRange!.value = "0"
+				})
 			: Promise.resolve()
 	}
 
@@ -468,7 +471,7 @@ export class VideoMoq extends HTMLElement {
 				await this.#base.requestFullscreen()
 			}
 		} catch (error) {
-			console.error("Error entering fullscreen:", error)
+			log.error("Error entering fullscreen:", error)
 		}
 	}
 
@@ -476,7 +479,7 @@ export class VideoMoq extends HTMLElement {
 		try {
 			await document.exitFullscreen()
 		} catch (error) {
-			console.error("Error exiting fullscreen:", error)
+			log.error("Error exiting fullscreen:", error)
 		}
 	}
 
@@ -500,12 +503,12 @@ export class VideoMoq extends HTMLElement {
 		}
 
 		if (!this.#canvas) {
-			console.warn("Canvas element not found.")
+			log.warn("Canvas element not found.")
 			return
 		}
 
 		if (!this.#base) {
-			console.warn("Base element not found.")
+			log.warn("Base element not found.")
 			return
 		}
 
@@ -517,7 +520,7 @@ export class VideoMoq extends HTMLElement {
 			}))
 
 		if (!this.#pipWindow) {
-			console.warn("Picture-in-Picture window not found.")
+			log.warn("Picture-in-Picture window not found.")
 			return
 		}
 
@@ -565,13 +568,13 @@ export class VideoMoq extends HTMLElement {
 			this.#pipWindow?.close()
 			this.#pipWindow = undefined
 		} else {
-			console.warn("Failed to restore video element! Check DOM structure.")
+			log.warn("Failed to restore video element! Check DOM structure.")
 		}
 	}
 
 	private async togglePictureInPicture() {
 		if (!("documentPictureInPicture" in window)) {
-			console.warn("DocumentPictureInPicture API is not supported.")
+			log.warn("DocumentPictureInPicture API is not supported.")
 			return
 		}
 
@@ -582,7 +585,7 @@ export class VideoMoq extends HTMLElement {
 				this.exitPictureInPicture()
 			}
 		} catch (error) {
-			console.error("Error toggling Picture-in-Picture:", error)
+			log.error("Error toggling Picture-in-Picture:", error)
 		}
 	}
 
@@ -607,13 +610,13 @@ export class VideoMoq extends HTMLElement {
 				this.#trackList.querySelectorAll("li").forEach((element) => {
 					element.addEventListener("click", () => {
 						this.switchTrack(element.dataset.name || null).catch((error) => {
-							console.error("Error switching track:", error)
+							log.error("Error switching track:", error)
 						})
 					})
 					element.addEventListener("keydown", (e) => {
 						if (e.key === "Enter" || e.key === " ") {
 							this.switchTrack(element.dataset.name || null).catch((error) => {
-								console.error("Error switching track:", error)
+								log.error("Error switching track:", error)
 							})
 						}
 					})
@@ -644,7 +647,7 @@ export class VideoMoq extends HTMLElement {
 
 		// Check for NaN or negative values
 		if (isNaN(parsed) || parsed <= 0) {
-			console.warn(`Invalid value "${value}" for dimension, using default: ${defaultValue}px`)
+			log.warn(`Invalid value "${value}" for dimension, using default: ${defaultValue}px`)
 			return defaultValue
 		}
 
@@ -653,7 +656,7 @@ export class VideoMoq extends HTMLElement {
 
 	/** Prints error and displays it in a red box */
 	private fail(error?: Error) {
-		console.error("Moq Player failed, please reload", error)
+		log.error("Moq Player failed, please reload", error)
 
 		this.error = error || new Error("Unknown error")
 
@@ -685,7 +688,7 @@ export class VideoMoq extends HTMLElement {
 
 	set currentTime(value: number) {
 		if (value < this.duration) {
-			console.warn("Seeking within the buffer is not supported in live mode.")
+			log.warn("Seeking within the buffer is not supported in live mode.")
 		}
 	}
 
@@ -703,3 +706,7 @@ export class VideoMoq extends HTMLElement {
 // Register the custom element
 customElements.define("video-moq", VideoMoq)
 export default VideoMoq
+
+// Re-export logger API so consumers of @moq-js/player can configure logging.
+export { setGlobalLogger, getGlobalLogger, createConsoleLogger, notifyLoggerLevelChanged } from "../common/logger"
+export type { Logger, LogLevel } from "../common/logger"

@@ -2,6 +2,9 @@ import * as Message from "./message"
 import { Ring } from "../../common/ring"
 import { Component, Frame } from "./timeline"
 import * as MP4 from "../../media/mp4"
+import { getWorkerLogger } from "../../common/logger"
+
+const log = getWorkerLogger()
 
 // This is run in a worker.
 export class Renderer {
@@ -20,7 +23,7 @@ export class Renderer {
 			transform: this.#transform.bind(this),
 		})
 
-		this.#run().catch(console.error)
+		this.#run().catch((e) => log.error("run failed", e))
 	}
 
 	#start(controller: TransformStreamDefaultController) {
@@ -28,7 +31,7 @@ export class Renderer {
 			output: (frame: AudioData) => {
 				controller.enqueue(frame)
 			},
-			error: console.warn,
+			error: (e) => log.warn("audio decoder error", e),
 		})
 	}
 
@@ -104,7 +107,7 @@ export class Renderer {
 			const written = this.#ring.write(frame)
 
 			if (written < frame.numberOfFrames) {
-				console.warn(`droppped ${frame.numberOfFrames - written} audio samples`)
+				log.warn(`dropped ${frame.numberOfFrames - written} audio samples`)
 			}
 		}
 	}

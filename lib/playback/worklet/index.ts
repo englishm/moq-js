@@ -1,22 +1,27 @@
 // TODO add support for @/ to avoid relative imports
 import { Ring } from "../../common/ring"
 import * as Message from "./message"
+import { getWorkletLogger, setWorkletLogLevel } from "../../common/logger"
 
 class Renderer extends AudioWorkletProcessor {
 	ring?: Ring
 	base: number
+	#log!: ReturnType<typeof getWorkletLogger>
 
 	constructor() {
 		// The super constructor call is required.
 		super()
 
 		this.base = 0
+		this.#log = getWorkletLogger(this.port)
 		this.port.onmessage = this.onMessage.bind(this)
 	}
 
 	onMessage(e: MessageEvent) {
 		const msg = e.data as Message.From
-		if (msg.config) {
+		if (msg.logLevel !== undefined) {
+			setWorkletLogLevel(msg.logLevel)
+		} else if (msg.config) {
 			this.onConfig(msg.config)
 		}
 	}
@@ -39,7 +44,7 @@ class Renderer extends AudioWorkletProcessor {
 		if (this.ring.size() == this.ring.capacity) {
 			// This is a hack to clear any latency in the ring buffer.
 			// The proper solution is to play back slightly faster?
-			console.warn("resyncing ring buffer")
+			this.#log.warn("resyncing ring buffer")
 			this.ring.clear()
 			return true
 		}

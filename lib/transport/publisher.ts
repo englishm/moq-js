@@ -3,6 +3,9 @@ import { ControlStream } from "./stream"
 import { Queue, Watch } from "../common/async"
 import { Objects, TrackWriter, ObjectDatagramType } from "./objects"
 import { SubgroupType, SubgroupWriter } from "./subgroup"
+import { getLogger } from "../common/logger"
+
+const log = getLogger()
 
 export class Publisher {
 	// Used to send control messages
@@ -54,20 +57,20 @@ export class Publisher {
 	}
 
 	async recv(msg: Control.MessageWithType) {
-		const { type, message } = msg;
+		const { type, message } = msg
 		switch (type) {
 			case Control.ControlMessageType.Subscribe:
 				await this.recvSubscribe(message)
-				break;
+				break
 			case Control.ControlMessageType.Unsubscribe:
 				this.recvUnsubscribe(message)
-				break;
+				break
 			case Control.ControlMessageType.PublishNamespaceOk:
 				this.recvPublishNamespaceOk(message)
-				break;
+				break
 			case Control.ControlMessageType.PublishNamespaceError:
 				this.recvPublishNamespaceError(message)
-				break;
+				break
 			default:
 				throw new Error(`unknown control message`) // impossible
 		}
@@ -84,7 +87,7 @@ export class Publisher {
 		}
 
 		publishNamespaceSend.onOk()
-		console.log("published namespace:", namespace)
+		log.debug("published namespace", namespace)
 	}
 
 	recvPublishNamespaceError(msg: Control.PublishNamespaceError) {
@@ -95,7 +98,7 @@ export class Publisher {
 		const publishNamespaceSend = this.#publishedNamespaces.get(namespace)
 		if (!publishNamespaceSend) {
 			// TODO debug this
-			console.warn(`publish namespace error for unknown announce: ${namespace}`)
+			log.warn(`publish namespace error for unknown announce: ${namespace}`)
 			return
 		}
 
@@ -119,7 +122,7 @@ export class Publisher {
 					id: msg.id,
 					code: 0n,
 					reason: e.message,
-				}
+				},
 			})
 			throw e
 		}
@@ -149,7 +152,7 @@ export class PublishNamespaceSend {
 	}
 
 	async ok() {
-		for (; ;) {
+		for (;;) {
 			const [state, next] = this.#state.value()
 			if (state === "ack") return
 			if (state instanceof Error) throw state
@@ -160,7 +163,7 @@ export class PublishNamespaceSend {
 	}
 
 	async active() {
-		for (; ;) {
+		for (;;) {
 			const [state, next] = this.#state.value()
 			if (state instanceof Error) throw state
 			if (!next) return
@@ -222,7 +225,7 @@ export class SubscribeRecv {
 		if (this.#state !== "init") return
 		this.#state = "ack"
 
-		console.log("got subscribe req:", this.#id, "track:", this.#trackAlias, "sending subscribe ok")
+		log.debug("sending subscribe ok", { id: this.#id, trackAlias: this.#trackAlias })
 
 		// NOTE(itzmanish): revisit this
 		// Send the control message.
@@ -235,12 +238,20 @@ export class SubscribeRecv {
 				track_alias: this.#trackAlias,
 				content_exists: 0,
 				params: new Map(),
-			}
+			},
 		})
 	}
 
 	// Close the subscription with an error.
-	async close({ code = 0n, reason = "", unsubscribe = true }: { code?: bigint; reason?: string; unsubscribe?: boolean }) {
+	async close({
+		code = 0n,
+		reason = "",
+		unsubscribe = true,
+	}: {
+		code?: bigint
+		reason?: string
+		unsubscribe?: boolean
+	}) {
 		if (this.#state === "closed") return
 		const acked = this.#state === "ack"
 		this.#state = "closed"
@@ -248,13 +259,13 @@ export class SubscribeRecv {
 		if (!acked) {
 			return this.#control.send({
 				type: Control.ControlMessageType.SubscribeError,
-				message: { id: this.#id, code, reason }
+				message: { id: this.#id, code, reason },
 			})
 		}
 		if (unsubscribe) {
 			return this.#control.send({
 				type: Control.ControlMessageType.Unsubscribe,
-				message: { id: this.#id }
+				message: { id: this.#id },
 			})
 		}
 	}
